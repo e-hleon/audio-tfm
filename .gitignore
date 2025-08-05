@@ -4,3 +4,8 @@ __pycache__/
 *.pyo
 .env
 __pycache__/
+# archivos de prueba
+*.wav
+*.mp3
+*.m4a
+*.opus
