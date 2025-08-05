@@ -1,0 +1,104 @@
+version: "3.9"
+
+services:
+  #------------- Gateway / Ingress -----------------------
+  traefik:
+    image: traefik:v3.0
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  #------------- Base de datos ---------------------------
+  db:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tfm
+      TZ: ${TIMEZONE}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  #------------- Almacén de objetos ----------------------
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    ports:          # consola accesible sólo en LAN
+      - "9000:9000"
+      - "9001:9001"
+
+  #------------- Broker ----------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # panel web
+    healthcheck:
+        test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+
+  #------------- API de ingest ---------------------------
+  ingest:
+    build: ./ingest
+    env_file: .env
+    restart: unless-stopped
+    depends_on:              # ✅ usa SOLO el formato mapeo
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_started
+      minio:
+        condition: service_started
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ingest.rule=PathPrefix(`/`)
+      - traefik.http.routers.ingest.entrypoints=web
+      - traefik.http.services.ingest.loadbalancer.server.port=8000
+    ports:                    # mantiene depuración directa
+      - "8000:8000"
+
+  #------------- Worker transcribe -----------------------
+  worker-transcribe:
+    build: ./worker
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  #------------- Worker NLP / resumen --------------------
+  worker-nlp:
+    build: ./nlp
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_started
+
+volumes:
+  pgdata:
+  minio-data:
