@@ -6,3 +6,5 @@ pika
 openai
 psycopg2-binary
 python-dotenv
+sqlmodel          # ORM ligero para lectura
+fastapi-jwt-auth

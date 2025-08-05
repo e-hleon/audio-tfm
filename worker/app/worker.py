@@ -1,4 +1,4 @@
-import os, json, tempfile, psycopg2, boto3, openai, pika, traceback
+import os, json, tempfile, psycopg2, boto3, openai, pika, traceback, time
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +36,13 @@ def callback(ch, method, properties, body):
                 # envía a cola nlp
                 ch.basic_publish(exchange="", routing_key="nlp", body=json.dumps({"transcript_id": tid}))
         ch.basic_ack(delivery_tag=method.delivery_tag)
+    except openai.RateLimitError:
+        print("⚠️ Rate-limit: reencolando tras 60 s")
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+        time.sleep(60)
+    except openai.BadRequestError as e:
+        print("⚠️ Archivo no soportado:", e)
+        ch.basic_ack(delivery_tag=method.delivery_tag)  # descarta mensaje
     except Exception as e:
         traceback.print_exc()
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)

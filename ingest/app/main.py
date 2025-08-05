@@ -1,10 +1,29 @@
 import os, tempfile, json, boto3, pika, psycopg2, uuid
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi_jwt_auth import AuthJWT
+from fastapi_jwt_auth.exceptions import AuthJWTException
+from sqlmodel import SQLModel, Field, Session, select
 
 app = FastAPI()
+
+# ---------- CONFIG JWT -------------
+class Settings(SQLModel):
+    authjwt_secret_key: str = os.getenv("JWT_SECRET", "change_me")
+    authjwt_algorithm: str = os.getenv("JWT_ALGO", "HS256")
+
+@AuthJWT.load_config
+def get_config():
+    return Settings()
+
+# Excepción global → 401 json
+@app.exception_handler(AuthJWTException)
+def auth_exception(request, exc):
+    return HTTPException(status_code=exc.status_code, detail=exc.message)
+
 s3 = boto3.client(
     "s3",
     endpoint_url=f"http://{os.environ['MINIO_ENDPOINT']}",
@@ -12,6 +31,13 @@ s3 = boto3.client(
     aws_secret_access_key=os.environ["MINIO_SECRET_KEY"],
 )
 bucket = os.environ["MINIO_BUCKET"]
+
+# ---------- MODELO lectura ----------
+class Transcript(SQLModel, table=False):
+    id: int
+    created_at: datetime
+    text: str | None
+    summary: str | None
 
 # connection = pika.BlockingConnection(pika.URLParameters(os.environ["RABBITMQ_URL"]))
 # channel = connection.channel()
@@ -34,7 +60,8 @@ def health():
     return {"status": "ok"}
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), Authorize: AuthJWT = Depends()):
+    Authorize.jwt_required()
     tmp_path = ""
     try:
 #        # 1) guarda temporal
@@ -56,3 +83,27 @@ async def upload(file: UploadFile = File(...)):
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+# ---------- ENDPOINT lectura --------
+@app.get("/transcripts", response_model=list[Transcript])
+async def list_transcripts(limit: int = 20, offset: int = 0, Authorize: AuthJWT = Depends()):
+    Authorize.jwt_required()
+    with psycopg2.connect(os.environ["POSTGRES_DSN"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, created_at, text, summary
+                FROM transcripts
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset),
+            )
+            rows = cur.fetchall()
+            return [Transcript.model_validate(r) for r in rows]
+
+
+@app.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), Authorize: AuthJWT = Depends()):
+    access = Authorize.create_access_token(subject=form_data.username, expires_time=False)
+    return {"access_token": access, "token_type": "bearer"}
