@@ -1,8 +1,14 @@
 fastapi
 uvicorn[standard]
 python-multipart
+
 boto3
 pika
 openai
 psycopg2-binary
 python-dotenv
+
+# Compatibilidad JWT  ───────────────
+pydantic>=1.10,<2.0          # fastapi-jwt-auth aún requiere Pydantic v1
+sqlmodel==0.0.8              # última versión que usa Pydantic v1
+fastapi-jwt-auth==0.5.0
