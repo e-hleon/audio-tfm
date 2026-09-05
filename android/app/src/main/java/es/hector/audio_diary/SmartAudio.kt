@@ -79,6 +79,7 @@ class AcousticSpeakerSimilarity(private var template: FloatArray? = null) {
         return floatArrayOf(mean.toFloat(), energy, crossings)
     }
     fun enroll(samples: ShortArray) { template = representation(samples) }
+    fun enrollRepresentation(values: FloatArray) { require(values.size == 3); template = values }
     fun hasEnrollment() = template != null
     fun score(samples: ShortArray): Float {
         val expected = template ?: return 0f
