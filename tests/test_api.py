@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from threading import Event
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +18,44 @@ from app.analysis import (
 from app.main import MAX_BYTES, create_app
 from app.schemas import AnalysisResult
 from app.transcription import AudioTooLong, InvalidAudio
+
+
+class FakeSession:
+    def __init__(self, store, fail_commit=False):
+        self.store = store
+        self.fail_commit = fail_commit
+        self.pending = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def add(self, item):
+        self.pending.append(item)
+
+    def flush(self):
+        for item in self.pending:
+            item.id = item.id or uuid.uuid4()
+            item.created_at = item.created_at or datetime.now(timezone.utc)
+            item.updated_at = item.updated_at or item.created_at
+
+    def commit(self):
+        if self.fail_commit:
+            from sqlalchemy.exc import OperationalError
+            raise OperationalError("commit", {}, RuntimeError("db down"))
+        self.store.extend(self.pending)
+        self.pending.clear()
+
+    def refresh(self, item):
+        return None
+
+    def expunge(self, item):
+        return None
+
+    def rollback(self):
+        self.pending.clear()
 
 
 class FakeTranscriber:
@@ -55,7 +95,7 @@ class FakeAnalyzer:
 def api():
     transcriber = FakeTranscriber()
     analyzer = FakeAnalyzer()
-    with TestClient(create_app(lambda: transcriber, lambda: analyzer)) as client:
+    with TestClient(create_app(lambda: transcriber, lambda: analyzer, lambda: FakeSession([]))) as client:
         yield client, transcriber, analyzer
 
 
@@ -178,3 +218,56 @@ def test_process_reuses_transcription_and_sends_its_text_only(api):
     assert body["analysis"]["summary"] == "Resumen de prueba"
     assert analyzer.texts == ["Texto de prueba"]
     assert all(file.closed for file in transcriber.files)
+
+
+def test_process_persists_and_returns_compatibility_fields():
+    transcriber, analyzer, store = FakeTranscriber(), FakeAnalyzer(), []
+    with TestClient(create_app(lambda: transcriber, lambda: analyzer, lambda: FakeSession(store))) as client:
+        response = client.post(
+            "/process",
+            files={"file": ("test.wav", b"audio")},
+            data={"recorded_at": "2026-09-05T12:00:00+02:00"},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["transcription"]["text"] == "Texto de prueba"
+    assert body["analysis"]["summary"] == "Resumen de prueba"
+    assert body["interaction_id"]
+    assert body["recorded_at"] == "2026-09-05T10:00:00+00:00"
+    assert len(store) == 1
+    assert store[0].analysis["summary"] == "Resumen de prueba"
+
+
+def test_process_recorded_at_falls_back_to_aware_receipt_and_rejects_naive():
+    transcriber, analyzer, store = FakeTranscriber(), FakeAnalyzer(), []
+    with TestClient(create_app(lambda: transcriber, lambda: analyzer, lambda: FakeSession(store))) as client:
+        fallback = client.post("/process", files={"file": ("test.wav", b"audio")})
+        naive = client.post(
+            "/process", files={"file": ("test.wav", b"audio")}, data={"recorded_at": "2026-09-05T12:00:00"}
+        )
+    assert fallback.status_code == 200
+    assert fallback.json()["recorded_at"].endswith("+00:00")
+    assert naive.status_code == 422
+    assert len(store) == 1
+
+
+@pytest.mark.parametrize("failure", [InvalidAudio("fallo ASR"), AnalysisInvalidResponse("fallo LLM")])
+def test_process_does_not_persist_when_asr_or_analysis_fails(failure):
+    transcriber, analyzer, store = FakeTranscriber(), FakeAnalyzer(), []
+    if isinstance(failure, InvalidAudio):
+        transcriber.error = failure
+    else:
+        analyzer.error = failure
+    with TestClient(create_app(lambda: transcriber, lambda: analyzer, lambda: FakeSession(store))) as client:
+        response = client.post("/process", files={"file": ("test.wav", b"audio")})
+    assert response.status_code in (400, 502)
+    assert store == []
+
+
+def test_process_returns_safe_error_when_commit_fails():
+    transcriber, analyzer = FakeTranscriber(), FakeAnalyzer()
+    with TestClient(create_app(lambda: transcriber, lambda: analyzer, lambda: FakeSession([], fail_commit=True))) as client:
+        response = client.post("/process", files={"file": ("test.wav", b"audio")})
+    assert response.status_code == 503
+    assert "DATABASE_URL" not in response.text
+    assert "db down" not in response.text

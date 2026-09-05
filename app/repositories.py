@@ -26,13 +26,18 @@ def list_interactions(
     session: Session,
     start: datetime | None = None,
     end: datetime | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Interaction]:
     statement = select(Interaction)
     if start is not None:
         statement = statement.where(Interaction.recorded_at >= to_utc(start))
     if end is not None:
         statement = statement.where(Interaction.recorded_at < to_utc(end))
-    return list(session.scalars(statement.order_by(Interaction.recorded_at, Interaction.id)))
+    statement = statement.order_by(Interaction.recorded_at, Interaction.id).offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return list(session.scalars(statement))
 
 
 def upsert_daily_summary(

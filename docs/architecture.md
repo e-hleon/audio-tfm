@@ -22,6 +22,11 @@ Archivo → POST /transcriptions (multipart/form-data)
 
 Texto → POST /analyses (JSON) → Responses API OpenAI → AnalysisResult
 Audio → POST /process → transcripción local → solo texto a OpenAI → JSON conjunto
+
+`POST /process` persiste la interacción después de ASR y análisis. `GET
+/interactions/{id}` recupera una interacción y `GET /interactions` ofrece un
+histórico paginado con filtros temporales. `/transcriptions` y `/analyses` siguen
+siendo operaciones sin persistencia.
 ```
 
 `app/main.py` gestiona HTTP, límites, exclusión mutua y cierre del archivo.
@@ -94,8 +99,9 @@ No se implementan Android, workers separados ni Redis/RQ. Docker Compose define 
 API y PostgreSQL, sin infraestructura adicional. El LLM externo
 se incorpora como llamada de texto síncrona porque es el objetivo de este incremento.
 
-El diario completo, la cronología y la persistencia siguen siendo objetivos del
-proyecto completo; el análisis estructurado ya forma parte de este incremento.
+El diario completo, la cronología y los resúmenes diarios siguen siendo objetivos
+del proyecto completo; la persistencia de interacciones y el histórico básico ya
+forman parte de este incremento.
 Una cola se reconsiderará cuando los
 tiempos de espera o la recuperación de trabajos constituyan requisitos reales.
 El puerto del host es configurable mediante `API_PORT` (8000 por defecto);

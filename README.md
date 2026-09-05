@@ -1,8 +1,8 @@
 # Audio TFM
 
 MVP del diario personal: audio → transcripción local CUDA → análisis estructurado.
-La base de persistencia ya incluye PostgreSQL para interacciones y resúmenes diarios,
-pero todavía no hay endpoints de histórico ni integración de `/process` con la base.
+La base de persistencia incluye PostgreSQL para interacciones y resúmenes diarios.
+`/process` persiste las interacciones y el histórico se consulta mediante `/interactions`.
 El alcance general sigue en [docs/scope.md](docs/scope.md).
 
 **Transcripción real por HTTP verificada en una RTX 3050 Laptop de 4 GB.**
@@ -52,8 +52,8 @@ persistencia:
 docker compose exec api alembic upgrade head
 ```
 
-La API todavía no guarda automáticamente las peticiones de `/process`; este bloque
-deja disponibles los modelos y repositorios para la siguiente integración.
+`/process` guarda la transcripción y el análisis después de completar correctamente
+ambos pasos. El audio y el filename siguen siendo temporales y no se almacenan.
 
 El primer arranque descarga el modelo `base` multilingüe al volumen Docker
 `models`. Esperar al mensaje `Application startup complete`. Salir de los logs
@@ -113,7 +113,9 @@ curl --fail-with-body --max-time 240 \
 ```
 
 `POST /analyses` recibe `{ "text": "..." }` y `POST /process` devuelve la
-transcripción y su análisis sin repetir la lógica ASR. El análisis contiene:
+transcripción, su análisis e `interaction_id` sin repetir la lógica ASR. El histórico
+se consulta con `GET /interactions/{id}` o `GET /interactions`; admite `limit`,
+`offset`, `from` y `to` como intervalos timezone-aware. El análisis contiene:
 
 ```json
 {

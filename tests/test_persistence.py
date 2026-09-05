@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import inspect as sqlalchemy_inspect, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
@@ -17,6 +18,8 @@ from app.repositories import (
 )
 from app.settings import Settings
 from app.time_utils import day_interval, ensure_aware, to_utc
+from app.main import create_app
+from app.schemas import AnalysisResult
 
 
 def test_settings_validate_timezone(monkeypatch):
@@ -64,9 +67,27 @@ def interaction_values(recorded_at):
         "transcription_model": "base",
         "transcription_device": "cuda",
         "transcription_compute_type": "int8_float16",
-        "analysis": {"summary": "Resumen", "topics": ["prueba"]},
+        "analysis": {"summary": "Resumen", "topics": ["prueba"], "decisions": [], "tasks": [], "reminders": []},
         "analysis_model": "test-model",
     }
+
+
+class HttpFakeTranscriber:
+    def details(self):
+        return {"model": "fake", "device": "cuda", "compute_type": "int8_float16"}
+
+    def transcribe(self, file):
+        return {"text": "Texto persistido", "language": "es", **self.details()}
+
+
+class HttpFakeAnalyzer:
+    model = "fake-llm"
+
+    def available(self):
+        return True
+
+    def analyze(self, text):
+        return AnalysisResult(summary="Resumen persistido", topics=["persistencia"], decisions=[], tasks=[], reminders=[])
 
 
 def test_migration_created_expected_tables(db_engine):
@@ -82,7 +103,8 @@ def test_create_get_jsonb_and_timezone_aware(session):
     session.commit()
     found = get_interaction(session, item.id)
     assert found is not None
-    assert found.analysis == {"summary": "Resumen", "topics": ["prueba"]}
+    assert found.analysis["summary"] == "Resumen"
+    assert found.analysis["topics"] == ["prueba"]
     assert found.recorded_at.tzinfo is not None
     assert found.created_at.tzinfo is not None
     assert found.updated_at.tzinfo is not None
@@ -173,3 +195,45 @@ def test_europe_madrid_midnight_and_dst():
 def test_interaction_model_has_no_audio_fields():
     columns = set(Interaction.__table__.columns.keys())
     assert not columns.intersection({"audio", "audio_path", "filename", "prompt"})
+
+
+def test_http_process_and_history_against_postgresql(db_engine, session):
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        first = client.post(
+            "/process",
+            files={"file": ("ignored.wav", b"synthetic")},
+            data={"recorded_at": "2026-09-05T10:00:00+00:00"},
+        )
+        assert first.status_code == 200
+        body = first.json()
+        assert body["transcription"]["text"] == "Texto persistido"
+        assert body["analysis"]["summary"] == "Resumen persistido"
+        interaction_id = body["interaction_id"]
+
+        detail = client.get(f"/interactions/{interaction_id}")
+        assert detail.status_code == 200
+        assert detail.json()["analysis_model"] == "fake-llm"
+        assert detail.json()["transcription"]["model"] == "fake"
+
+        history = client.get("/interactions", params={"from": "2026-09-05T10:00:00Z", "to": "2026-09-05T11:00:00Z"})
+        assert history.status_code == 200
+        assert len(history.json()) == 1
+        assert client.get("/interactions/00000000-0000-0000-0000-000000000000").status_code == 404
+        assert client.get("/interactions/not-a-uuid").status_code == 422
+
+
+def test_http_history_limit_offset_and_timezone_filters(db_engine, session):
+    for hour in (8, 9, 10):
+        create_interaction(session, **interaction_values(datetime(2026, 9, 5, hour, tzinfo=timezone.utc)))
+    session.commit()
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        limited = client.get("/interactions", params={"limit": 1, "offset": 1})
+        assert limited.status_code == 200
+        assert limited.json()[0]["recorded_at"].startswith("2026-09-05T09:00:00")
+        semi_open = client.get(
+            "/interactions",
+            params={"from": "2026-09-05T09:00:00+02:00", "to": "2026-09-05T12:00:00+02:00"},
+        )
+        assert semi_open.status_code == 200
+        assert len(semi_open.json()) == 2
+        assert client.get("/interactions", params={"from": "2026-09-05T12:00:00"}).status_code == 422
