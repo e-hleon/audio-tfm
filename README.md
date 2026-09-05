@@ -1,8 +1,9 @@
 # Audio TFM
 
 MVP del diario personal: audio → transcripción local CUDA → análisis estructurado.
-No incluye persistencia, cliente Android, colas ni servicios adicionales. El alcance
-general sigue en [docs/scope.md](docs/scope.md).
+La base de persistencia ya incluye PostgreSQL para interacciones y resúmenes diarios,
+pero todavía no hay endpoints de histórico ni integración de `/process` con la base.
+El alcance general sigue en [docs/scope.md](docs/scope.md).
 
 **Transcripción real por HTTP verificada en una RTX 3050 Laptop de 4 GB.**
 Modelo `base`, `int8_float16`, ejecución CUDA y 32 tests automatizados correctos.
@@ -42,6 +43,17 @@ docker compose build --no-cache
 docker compose up -d
 docker compose logs -f api
 ```
+
+PostgreSQL 16 se ejecuta como servicio Compose y conserva sus datos en el volumen
+`postgres_data`. La primera migración se aplica explícitamente antes de usar la
+persistencia:
+
+```bash
+docker compose exec api alembic upgrade head
+```
+
+La API todavía no guarda automáticamente las peticiones de `/process`; este bloque
+deja disponibles los modelos y repositorios para la siguiente integración.
 
 El primer arranque descarga el modelo `base` multilingüe al volumen Docker
 `models`. Esperar al mensaje `Application startup complete`. Salir de los logs

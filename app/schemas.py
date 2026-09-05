@@ -34,6 +34,11 @@ class AnalysisResult(StrictModel):
     reminders: list[Reminder]
 
 
+class DailySummaryResult(StrictModel):
+    summary: str
+    topics: list[str]
+
+
 class AnalysisRequest(StrictModel):
     # El límite acota coste y contexto sin imponer una persistencia.
     text: Annotated[str, Field(max_length=20_000)]

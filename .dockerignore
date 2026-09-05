@@ -6,4 +6,7 @@
 !requirements.txt
 !requirements-test.txt
 !Dockerfile
+!alembic.ini
+!alembic/
+!alembic/**
 **/__pycache__/

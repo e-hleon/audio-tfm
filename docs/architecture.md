@@ -6,8 +6,10 @@ El alcance completo del diario permanece en `scope.md`.
 
 ## Componentes
 
-Un servicio Docker Compose `api` contiene FastAPI, Uvicorn, faster-whisper y la
-SDK oficial de OpenAI. OpenAI es un proveedor externo, no un contenedor adicional.
+Docker Compose contiene un servicio `api` y PostgreSQL 16. La API contiene FastAPI,
+Uvicorn, faster-whisper y la SDK oficial de OpenAI; OpenAI es un proveedor externo,
+no un contenedor adicional. PostgreSQL conserva las interacciones y resúmenes cuando
+la capa de aplicación los utiliza.
 Uvicorn inicia un único proceso y el ciclo de vida de FastAPI carga una instancia
 Whisper `base` en CUDA con `int8_float16`. Si no se puede cargar, falla el arranque.
 
@@ -32,6 +34,13 @@ se consultan al modelo efectivo.
 tareas y recordatorios. La API recibe o produce estos contratos y el proveedor usa
 el JSON Schema generado con Structured Outputs estricto. Así, un proveedor local
 posterior puede implementar `Analyzer` sin cambiar rutas HTTP.
+
+La persistencia síncrona se organiza en `app/db.py`, `app/models.py` y
+`app/repositories.py`, con SQLAlchemy 2.x y psycopg. Alembic es la única fuente de
+migraciones; no se usa `create_all()` en el arranque. `AnalysisResult` se conserva
+como JSONB para mantener el contrato completo sin introducir tablas hijas prematuras.
+Los timestamps se almacenan con zona horaria y se normalizan a UTC; `APP_TIMEZONE`
+se reserva para calcular días locales.
 
 La petición espera al resultado. La inferencia se ejecuta en un hilo del mismo
 proceso; no hay worker separado. Solo se permite una inferencia; las peticiones
@@ -81,8 +90,8 @@ se traducen sin exponer detalles: autenticación 502, límite 429, tiempo agotad
 
 ## Diferencias frente a la propuesta anterior
 
-No se implementan Android, workers separados, Redis/RQ ni PostgreSQL. Docker
-Compose define un único servicio, sin infraestructura adicional. El LLM externo
+No se implementan Android, workers separados ni Redis/RQ. Docker Compose define la
+API y PostgreSQL, sin infraestructura adicional. El LLM externo
 se incorpora como llamada de texto síncrona porque es el objetivo de este incremento.
 
 El diario completo, la cronología y la persistencia siguen siendo objetivos del
@@ -93,3 +102,4 @@ El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
 la validación usó 8001 para convivir con un servicio anterior.
 La decisión se documenta en [ADR 001](decisions/001-synchronous-transcription-mvp.md).
 La decisión de análisis está en [ADR 002](decisions/002-structured-llm-analysis.md).
+La base de persistencia está documentada en [ADR 003](decisions/003-persistence-foundation.md).
