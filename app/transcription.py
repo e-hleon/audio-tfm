@@ -18,13 +18,13 @@ class AudioTooLong(ValueError):
 
 
 class Transcriber:
-    def __init__(self):
-        self.model_name = os.getenv("WHISPER_MODEL", "base")
+    def __init__(self, model_name=None, device=None, compute_type=None, download_root="/models"):
+        self.model_name = model_name or os.getenv("WHISPER_MODEL", "base")
         self.model = WhisperModel(
             self.model_name,
-            device="cuda",
-            compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "int8_float16"),
-            download_root="/models",
+            device=device or "cuda",
+            compute_type=compute_type or os.getenv("WHISPER_COMPUTE_TYPE", "int8_float16"),
+            download_root=download_root,
         )
         logging.getLogger("uvicorn.error").info("ASR ready: %s", self.details())
 

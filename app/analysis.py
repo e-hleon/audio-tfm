@@ -83,6 +83,7 @@ class OpenAIAnalyzer:
         self.model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
         api_key = os.getenv("OPENAI_API_KEY")
         self.client = OpenAI(api_key=api_key, timeout=30.0) if api_key else None
+        self.last_call_metadata = {}
 
     def available(self) -> bool:
         return self.client is not None
@@ -135,6 +136,11 @@ class OpenAIAnalyzer:
                 )
 
         usage = response.usage
+        self.last_call_metadata = {
+            "model_effective": getattr(response, "model", self.model),
+            "input_tokens": getattr(usage, "input_tokens", None),
+            "output_tokens": getattr(usage, "output_tokens", None),
+        }
         logging.getLogger("uvicorn.error").info(
             "LLM analysis completed: model=%s latency_ms=%d input_tokens=%s output_tokens=%s",
             response.model,
