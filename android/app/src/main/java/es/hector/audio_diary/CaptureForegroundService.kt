@@ -75,29 +75,30 @@ class CaptureForegroundService : Service() {
             while (recordingJob?.isActive != false) {
                 val count = audioSource.read(readBuffer); if (count <= 0) continue
                 val samples = readBuffer.copyOf(count)
-                if (segmenter != null) for (frame in framer.add(samples)) segmenter.accept(frame)?.let { if ((smartVerifier?.score(it.samples) ?: 0f) >= .75f) saveSegment(it.samples, it.recordedAt) }
+                if (segmenter != null) for (frame in framer.add(samples)) segmenter.accept(frame)?.let { increment("detected"); if ((smartVerifier?.score(it.samples) ?: 0f) >= .75f) saveSegment(it.samples, it.recordedAt) else increment("discarded") }
                 else { accumulated.addAll(samples.toList()); if (accumulated.size >= maxSamples) { saveSegment(accumulated.toShortArray(), chunkStart); accumulated.clear(); chunkStart = Instant.now() } }
             }
         } finally {
-            if (segmenter != null) segmenter.stop()?.let { if ((smartVerifier?.score(it.samples) ?: 0f) >= .75f) saveSegment(it.samples, it.recordedAt) }
+            if (segmenter != null) segmenter.stop()?.let { increment("detected"); if ((smartVerifier?.score(it.samples) ?: 0f) >= .75f) saveSegment(it.samples, it.recordedAt) else increment("discarded") }
             else if (accumulated.isNotEmpty()) saveSegment(accumulated.toShortArray(), chunkStart)
             audioSource.stopAndRelease(); recorder = null
         }
     }
     private fun saveSegment(samples: ShortArray, recordedAt: Instant) {
         val directory = File(cacheDir, "pending-segments"); directory.mkdirs(); val file = File.createTempFile("segment-", ".wav", directory)
-        WavWriter.write(file, samples); if (queue.offer(PendingSegment(file, recordedAt))) wakeups.trySend(Unit) else file.delete()
+        WavWriter.write(file, samples); if (queue.offer(PendingSegment(file, recordedAt))) { increment("enqueued"); wakeups.trySend(Unit) } else { increment("discarded"); file.delete() }
     }
     private suspend fun uploadLoop(backendUrl: String) {
         while (recordingJob?.isActive != false || queue.size > 0) {
             wakeups.receive(); var item = queue.poll()
             while (item != null) {
-                try { RetrofitBackendRepository().process(CapturedAudio(item.file, item.recordedAt), backendUrl); item.file.delete() }
+                try { RetrofitBackendRepository().process(CapturedAudio(item.file, item.recordedAt), backendUrl); increment("sent"); item.file.delete() }
                 catch (_: Exception) { queue.requeue(item); break }
                 item = queue.poll()
             }
         }
     }
+    private fun increment(key: String) { val prefs = getSharedPreferences("audio_diary", MODE_PRIVATE); prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply() }
     private fun stopCapture() { recordingJob?.cancel(); recordingJob = null; recorder?.let { runCatching { it.stop(); it.release() }; recorder = null }; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
     override fun onDestroy() { recordingJob?.cancel(); recorder?.let { runCatching { it.stop(); it.release() } }; scope.cancel(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null

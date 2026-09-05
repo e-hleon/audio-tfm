@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 enum class AppScreen { CAPTURE, HISTORY, DAY }
 enum class CaptureMode { MANUAL, CONTINUOUS, SMART }
@@ -52,6 +54,8 @@ enum class CaptureMode { MANUAL, CONTINUOUS, SMART }
 
 @Composable private fun CaptureHome(viewModel: CaptureViewModel, url: String, preferences: SharedPreferences) {
     val context = LocalContext.current; val scope = rememberCoroutineScope(); var mode by remember { mutableStateOf(CaptureMode.MANUAL) }; var active by remember { mutableStateOf(false) }; var enrolling by remember { mutableStateOf(false) }
+    var stats by remember { mutableStateOf(CaptureStats.read(context)) }
+    LaunchedEffect(active) { while (active) { stats = CaptureStats.read(context); delay(1_000) } }
     val verifier = remember { AcousticSpeakerSimilarity().also { it.load(preferences.getString("speaker_template", "") ?: "") } }; var enrolled by remember { mutableStateOf(verifier.hasEnrollment()) }
     val permissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     var hasPermission by remember { mutableStateOf(permissionGranted) }; val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { hasPermission = it }
@@ -64,7 +68,7 @@ enum class CaptureMode { MANUAL, CONTINUOUS, SMART }
             CaptureMode.CONTINUOUS, CaptureMode.SMART -> { Text(if (mode == CaptureMode.CONTINUOUS) "El modo continuo conserva todo el audio de la sesión hasta procesarlo." else "Experimental: no es reconocimiento infalible.")
                 if (mode == CaptureMode.SMART) { Text(if (enrolled) "Plantilla local registrada" else "Sin enrollment: el modo inteligente no puede verificar al usuario"); if (!enrolling) Button({ if (hasPermission) { enrolling = true; scope.launch { runCatching { verifier.enroll(VoiceEnrollmentRecorder(context).record()); preferences.edit().putString("speaker_template", verifier.serialize()).apply(); enrolled = true }; enrolling = false } } }) { Text(if (enrolled) "Reemplazar mi voz" else "Registrar mi voz (4 s)") } else Text("Registrando voz localmente…"); if (enrolled) OutlinedButton({ verifier.clear(); preferences.edit().remove("speaker_template").apply(); enrolled = false }) { Text("Eliminar enrollment") } }
                 if (!active) Button({ if (hasPermission) { ContextCompat.startForegroundService(context, Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START).putExtra(CaptureForegroundService.EXTRA_SMART, mode == CaptureMode.SMART).putExtra(CaptureForegroundService.EXTRA_BACKEND, url)); active = true } }) { Text("Iniciar ${mode.name.lowercase()}") }
-                else { Text("Grabando ${mode.name.lowercase()} · micrófono activo", color = MaterialTheme.colorScheme.error); Button({ context.startService(Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_STOP)); active = false }) { Text("Detener") }; Text("Los chunks se suben secuencialmente; un fallo queda pendiente para reintento posterior.") }
+                else { Text("Grabando ${mode.name.lowercase()} · micrófono activo", color = MaterialTheme.colorScheme.error); Text(stats); Button({ context.startService(Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_STOP)); active = false }) { Text("Detener") }; Text("Los chunks se suben secuencialmente; un fallo queda pendiente para reintento posterior.") }
             }
         }
     }

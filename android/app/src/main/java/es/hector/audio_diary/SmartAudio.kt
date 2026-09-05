@@ -15,6 +15,9 @@ import kotlinx.coroutines.withContext
 const val AUDIO_SAMPLE_RATE = 16_000
 const val AUDIO_FRAME_MILLIS = 20
 const val AUDIO_FRAME_SAMPLES = AUDIO_SAMPLE_RATE * AUDIO_FRAME_MILLIS / 1_000
+object CaptureStats {
+    fun read(context: Context): String { val p = context.getSharedPreferences("audio_diary", Context.MODE_PRIVATE); return "Detectados ${p.getInt("detected", 0)} · enviados ${p.getInt("sent", 0)} · descartados ${p.getInt("discarded", 0)}" }
+}
 
 interface PcmAudioSource { fun start(); fun read(buffer: ShortArray): Int; fun stopAndRelease() }
 class AndroidAudioRecordSource(private val record: AudioRecord) : PcmAudioSource {
