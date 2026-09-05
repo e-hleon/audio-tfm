@@ -8,6 +8,11 @@ import java.time.Instant
 
 interface AudioRecorder { fun start(): CapturedAudio; fun stop(): CapturedAudio; fun discard() }
 
+fun clearAbandonedCaptures(cacheDir: File) {
+    cacheDir.listFiles { file -> file.name.startsWith("capture-") && file.name.endsWith(".m4a") }
+        ?.forEach { it.delete() }
+}
+
 class MediaRecorderAudioRecorder(private val context: Context, private val clock: Clock = Clock.systemUTC()) : AudioRecorder {
     private var recorder: MediaRecorder? = null
     private var captured: CapturedAudio? = null

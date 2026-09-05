@@ -18,7 +18,15 @@ class BackendTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody(responseJson))
         val file = File.createTempFile("audio", ".m4a").apply { writeBytes(byteArrayOf(1, 2)) }
         val result = RetrofitBackendRepository().process(CapturedAudio(file, Instant.parse("2026-09-05T10:00:00Z")), server.url("/").toString())
-        val request = server.takeRequest(); assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data")); assertTrue(request.body.readUtf8().contains("recorded_at")); assertEquals("id-1", result.interactionId)
+        val request = server.takeRequest()
+        val body = request.body.readUtf8()
+        assertEquals("POST", request.method)
+        assertEquals("/process", request.path)
+        assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data"))
+        assertTrue(body.contains("name=\"file\"")); assertTrue(body.contains(file.name)); assertTrue(body.contains("audio/mp4"))
+        assertTrue(body.contains("name=\"recorded_at\"")); assertTrue(body.contains("2026-09-05T10:00:00Z"))
+        assertEquals("id-1", result.interactionId); assertEquals("hola", result.transcription.text)
+        assertEquals("d", result.analysis.decisions.single().text); assertEquals("t", result.analysis.tasks.single().text); assertEquals("r", result.analysis.reminders.single().text)
         file.delete(); server.shutdown()
     }
     @Test fun parses_http_errors() = runBlocking {

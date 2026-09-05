@@ -1,13 +1,14 @@
 # Validación Android manual
 
-Automatizado previsto: tests JVM para estados, UTC, borrado temporal y Retry; y
-MockWebServer para multipart y parseo. CI ejecuta `testDebugUnitTest`, `lintDebug` y
-`assembleDebug` con JDK 17. La validación local de 2026-09-05 completó esos tres
-comandos correctamente con SDK 35 y JDK 17 temporales.
+Validado localmente: `testDebugUnitTest` (estados, Retry, borrado temporal, URL y
+MockWebServer multipart), `lintDebug`, `assembleDebug` y
+`compileDebugAndroidTestKotlin`, con SDK 35 y JDK 17 temporales. CI ejecuta los tres
+primeros comandos con JDK 17.
 
-Se añadió un smoke instrumentado Compose que comprueba los controles iniciales sin
-usar hardware. En este entorno no hay AVD/KVM configurado, por lo que no se ejecutó;
-la app y sus tests JVM sí se compilaron con SDK 35 temporal.
+El smoke instrumentado Compose fue compilado, pero no ejecutado: no hay binario
+`emulator`, AVD ni `/dev/kvm` disponibles en este entorno. Por tanto siguen pendientes
+el runtime instrumentado, el E2E Emulator → backend real y el único smoke final con
+Pixel (micrófono, permiso y Wi-Fi reales).
 
 El emulador y la prueba física son distintos: FakeAudioRecorder valida estado, UI y
 HTTP reproducibles, pero no el micrófono o MediaRecorder sobre hardware. Smoke final en

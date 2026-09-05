@@ -23,7 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     private val viewModel by viewModels<CaptureViewModel> { object : ViewModelProvider.Factory { @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>) = CaptureViewModel(MediaRecorderAudioRecorder(this@MainActivity), RetrofitBackendRepository()) as T } }
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { AudioDiaryScreen(viewModel, getPreferences(Context.MODE_PRIVATE)) } }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); clearAbandonedCaptures(cacheDir); setContent { AudioDiaryScreen(viewModel, getPreferences(Context.MODE_PRIVATE)) } }
     override fun onStop() { viewModel.cancelIfRecording(); super.onStop() }
 }
 
@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
             is UiState.Ready -> ReadyActions(onSend = { preferences.edit().putString("backend_url", url).apply(); viewModel.send(url) }, onDiscard = viewModel::discard)
             is UiState.Processing -> { Text("Procesando audio…"); LinearProgressIndicator(Modifier.fillMaxWidth()) }
             is UiState.Error -> { Text(current.message, color = MaterialTheme.colorScheme.error); if (current.audio != null) ReadyActions(onSend = { viewModel.send(url) }, onDiscard = viewModel::discard) else Button(onClick = viewModel::discard) { Text("Descartar") } }
-            is UiState.Success -> Result(current.response)
+            is UiState.Success -> { Result(current.response); Button(onClick = viewModel::newRecording) { Text("Nueva grabación") } }
         }
     } }
 }

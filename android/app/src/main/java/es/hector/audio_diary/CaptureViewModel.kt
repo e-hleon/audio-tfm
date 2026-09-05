@@ -27,6 +27,7 @@ class CaptureViewModel(private val recorder: AudioRecorder, private val backend:
         viewModelScope.launch { runCatching { backend.process(audio, url) }.onSuccess { audio.file.delete(); mutableState.value = UiState.Success(it) }.onFailure { mutableState.value = UiState.Error(errorMessage(it), audio) } }
     }
     fun discard() { timer?.cancel(); recorder.discard(); (state.value as? UiState.Ready)?.audio?.file?.delete(); (state.value as? UiState.Error)?.audio?.file?.delete(); mutableState.value = UiState.Idle }
+    fun newRecording() { if (state.value is UiState.Success) mutableState.value = UiState.Idle }
     fun cancelIfRecording() { if (state.value is UiState.Recording) discard() }
     override fun onCleared() { if (state.value is UiState.Recording) discard() }
     private fun errorMessage(error: Throwable) = when (error) { is IllegalArgumentException -> "URL del backend no válida"; is java.net.SocketTimeoutException -> "El procesamiento tardó demasiado"; is java.net.ConnectException -> "No se puede conectar con el servidor"; is retrofit2.HttpException -> if (error.code() in 400..499) "El servidor rechazó el audio" else "El servidor no pudo procesar el audio"; else -> "Se produjo un error durante el procesamiento" }
