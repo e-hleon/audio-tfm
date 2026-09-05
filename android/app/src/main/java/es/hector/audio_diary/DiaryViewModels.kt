@@ -8,10 +8,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-sealed interface HistoryState { data object Idle : HistoryState; data object Loading : HistoryState; data class Ready(val items: List<InteractionResponse>) : HistoryState; data class Error(val message: String) : HistoryState }
+sealed interface HistoryState { data object Idle : HistoryState; data object Loading : HistoryState; data class Ready(val items: List<InteractionResponse>) : HistoryState; data class Detail(val item: InteractionResponse) : HistoryState; data class Error(val message: String) : HistoryState }
 class HistoryViewModel(private val backend: BackendRepository) : ViewModel() {
     private val mutable = MutableStateFlow<HistoryState>(HistoryState.Idle); val state: StateFlow<HistoryState> = mutable.asStateFlow()
     fun load(url: String) { mutable.value = HistoryState.Loading; viewModelScope.launch { runCatching { backend.interactions(url) }.onSuccess { mutable.value = HistoryState.Ready(it.sortedByDescending { item -> item.recordedAt }) }.onFailure { mutable.value = HistoryState.Error(errorMessage(it)) } } }
+    fun detail(url: String, id: String) { mutable.value = HistoryState.Loading; viewModelScope.launch { runCatching { backend.interaction(url, id) }.onSuccess { mutable.value = HistoryState.Detail(it) }.onFailure { mutable.value = HistoryState.Error("No se pudo cargar el detalle") } } }
     private fun errorMessage(error: Throwable) = if (error is java.net.ConnectException) "No se puede conectar con el servidor" else "No se pudo cargar el histórico"
 }
 
