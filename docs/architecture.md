@@ -147,6 +147,21 @@ coseno contra una plantilla acústica local creada mediante enrollment explícit
 plantilla no es autenticación, no identifica a terceros y nunca se envía al backend.
 Si falta enrollment, el modo no comienza. El umbral actual es provisional y debe
 calibrarse con audio consentido; no se presentan métricas de speaker sin medición.
+
+```mermaid
+flowchart LR
+  A[MediaRecorder manual] --> B[M4A /process]
+  C[AudioRecord PCM16] --> D{modo}
+  D --> E[Continuo: chunks WAV 30 s]
+  D --> F[Inteligente: VAD + pre-roll]
+  E --> G[cola privada acotada]
+  F --> G
+  G --> H[upload secuencial]
+  H --> I[FastAPI /process]
+  I --> J[Whisper CUDA]
+  J --> K[OpenAI solo texto]
+  K --> L[PostgreSQL]
+```
 El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
 la validación usó 8001 para convivir con un servicio anterior.
 La decisión se documenta en [ADR 001](decisions/001-synchronous-transcription-mvp.md).
