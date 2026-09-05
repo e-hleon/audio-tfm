@@ -8,6 +8,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
+      - --log.level=INFO
     ports:
       - "80:80"
     healthcheck:
@@ -79,6 +80,7 @@ services:
       - traefik.http.routers.ingest.rule=PathPrefix(`/`)
       - traefik.http.routers.ingest.entrypoints=web
       - traefik.http.services.ingest.loadbalancer.server.port=8000
+      - traefik.docker.network=audio-tfm_default # fuerza la red para que Traefik hable con el contenedor correcto
     ports:                    # mantiene depuración directa
       - "8000:8000"
     healthcheck:

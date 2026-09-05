@@ -1,6 +1,7 @@
 import os, tempfile, json, boto3, pika, psycopg2, uuid
 from datetime import datetime
 from pathlib import Path
+from botocore.exceptions import ClientError
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -33,6 +34,18 @@ s3 = boto3.client(
     aws_secret_access_key=os.environ["MINIO_SECRET_KEY"],
 )
 bucket = os.environ["MINIO_BUCKET"]
+
+@app.on_event("startup")
+def ensure_bucket():
+    try:
+        s3.head_bucket(Bucket=bucket)
+    except ClientError:
+        try:
+            s3.create_bucket(Bucket=bucket)
+            # opcional: aplicar política/cors aquí si quieres
+        except ClientError as e:
+            # fallará /upload más tarde, pero dejamos el error logeado
+            print(f"⚠️ No se pudo crear bucket '{bucket}': {e}")
 
 # ---------- MODELO lectura ----------
 class Transcript(SQLModel, table=False):
@@ -69,11 +82,16 @@ async def upload(file: UploadFile = File(...), Authorize: AuthJWT = Depends()):
 #        # 1) guarda temporal
 #        suffix = datetime.utcnow().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex + ".opus"
         # 1) determina la extensión del archivo subido (.wav, .m4a, .mp3…)
-        ext = Path(file.filename).suffix or ".wav"
+        ext = Path(file.filename or "").suffix or ".wav"
         # 2) guarda temporal con esa misma extensión
         suffix = datetime.utcnow().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex + ext
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(await file.read())
+            # lee en chunks para no cargar todo a RAM
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
             tmp_path = tmp.name
 
         object_key = f"audio/{suffix}"

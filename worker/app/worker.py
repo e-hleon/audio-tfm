@@ -1,7 +1,11 @@
-import os, json, tempfile, psycopg2, boto3, openai, pika, traceback
 import os, json, tempfile, psycopg2, boto3, openai, pika, traceback, time
 from datetime import datetime
 from pathlib import Path
+
+# ——— desactiva este worker si usas Whisper local ———
+if os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true":
+    print("✂️  Cloud worker desactivado (USE_LOCAL_WHISPER=true)")
+    exit(0)
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
@@ -14,6 +18,24 @@ s3 = boto3.client(
 bucket = os.environ["MINIO_BUCKET"]
 
 conn = psycopg2.connect(os.environ["POSTGRES_DSN"])
+
+def connect_rabbit():
+    """Conecta a RabbitMQ con reintentos y heartbeats; devuelve (conn, channel)."""
+    url = os.environ["RABBITMQ_URL"]
+    params = pika.URLParameters(url)
+    params.heartbeat = 60
+    params.blocked_connection_timeout = 300
+    while True:
+        try:
+            conn = pika.BlockingConnection(params)
+            ch = conn.channel()
+            ch.queue_declare(queue="transcribe")
+            ch.queue_declare(queue="nlp")
+            ch.basic_qos(prefetch_count=1)
+            return conn, ch
+        except Exception as e:
+            print(f"⏳ RabbitMQ no disponible ({e}); reintento en 3s", flush=True)
+            time.sleep(3)
 
 def save_transcript(obj_key: str, text: str) -> int:
     with conn:
@@ -29,13 +51,20 @@ def callback(ch, method, properties, body):
         msg = json.loads(body)
         key = msg["object_key"]
         ext = Path(key).suffix or ".wav"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+        tmp.close()
+        try:
             s3.download_file(bucket, key, tmp.name)
             with open(tmp.name, "rb") as audio:
-                resp = openai.audio.transcriptions.create(model="gpt-4o-mini-transcribe", file=audio)
-                tid = save_transcript(key, resp.text)
-                # envía a cola nlp
-                ch.basic_publish(exchange="", routing_key="nlp", body=json.dumps({"transcript_id": tid}))
+                resp = openai.audio.transcriptions.create(
+                    model="gpt-4o-mini-transcribe", file=audio
+                )
+            tid = save_transcript(key, resp.text)
+            ch.basic_publish(exchange="", routing_key="nlp",
+                             body=json.dumps({"transcript_id": tid}))
+        finally:
+            try: os.unlink(tmp.name)
+            except FileNotFoundError: pass
         ch.basic_ack(delivery_tag=method.delivery_tag)
     except openai.RateLimitError:
         print("⚠️ Rate-limit: reencolando tras 60 s")
@@ -48,12 +77,17 @@ def callback(ch, method, properties, body):
         traceback.print_exc()
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
-# RabbitMQ
-connection = pika.BlockingConnection(pika.URLParameters(os.environ["RABBITMQ_URL"]))
-channel = connection.channel()
-channel.queue_declare(queue="transcribe")
-channel.queue_declare(queue="nlp")
-channel.basic_qos(prefetch_count=1)
-channel.basic_consume(queue="transcribe", on_message_callback=callback)
-print(" [*] Transcribe worker started. Waiting for messages.")
-channel.start_consuming()
+# RabbitMQ (loop de consumo con auto-reconexión)
+while True:
+    connection, channel = connect_rabbit()
+    channel.basic_consume(queue="transcribe", on_message_callback=callback)
+    print(" [*] Transcribe worker started. Waiting for messages.", flush=True)
+    try:
+        channel.start_consuming()
+    except Exception as e:
+        print(f"⚠️  Consumo interrumpido: {e}. Reintentando en 2s…", flush=True)
+        try:
+            connection.close()
+        except Exception:
+            pass
+        time.sleep(2)

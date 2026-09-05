@@ -10,3 +10,12 @@ __pycache__/
 *.m4a
 *.opus
 *:Zone.Identifier
+
+# ─ Whisper models ─
+models/*
+!models/.gitkeep
+
+/project.txt
+/nuevo 32.txt
+/models/
+*.bin
