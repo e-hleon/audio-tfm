@@ -357,6 +357,36 @@ def test_day_uses_madrid_local_day_and_dst(db_engine, session, monkeypatch):
     assert before_local_midnight.id != in_local_day.id
 
 
+def test_day_summary_stales_when_timezone_changes_with_same_fingerprint(db_engine, session, monkeypatch):
+    # El mediodía UTC pertenece al mismo 2026-09-05 tanto en UTC como en Madrid.
+    # Así se comprueba que stale proviene de la zona, no de otro conjunto de datos.
+    item = create_interaction(
+        session, **rich_interaction_values(datetime(2026, 9, 5, 12, tzinfo=timezone.utc))
+    )
+    session.commit()
+    monkeypatch.setenv("APP_TIMEZONE", "UTC")
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        assert client.post("/days/2026-09-05/summary").json()["status"] == "ready"
+
+    summary = get_daily_summary(session, date(2026, 9, 5))
+    assert summary.timezone == "UTC"
+    original_fingerprint = summary.source_fingerprint
+    assert original_fingerprint == interactions_fingerprint([item])
+
+    monkeypatch.setenv("APP_TIMEZONE", "Europe/Madrid")
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        stale = client.get("/days/2026-09-05")
+        assert stale.status_code == 200
+        assert stale.json()["summary"]["status"] == "stale"
+        assert [entry["id"] for entry in stale.json()["interactions"]] == [str(item.id)]
+        assert client.post("/days/2026-09-05/summary").json()["status"] == "ready"
+
+    session.expire_all()
+    regenerated = get_daily_summary(session, date(2026, 9, 5))
+    assert regenerated.source_fingerprint == original_fingerprint
+    assert regenerated.timezone == "Europe/Madrid"
+
+
 def test_day_rejects_outdated_generation_when_data_changes_during_llm_call(db_engine, session):
     create_interaction(session, **rich_interaction_values(datetime(2026, 9, 5, 10, tzinfo=timezone.utc)))
     session.commit()

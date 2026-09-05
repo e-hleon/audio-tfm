@@ -59,9 +59,12 @@ narrativo usa su contrato propio `DailySummaryResult` (`summary`, `topics`). Sol
 envía a OpenAI una proyección derivada: hora local, resumen, temas, decisiones, tareas
 y recordatorios. No incluye audio, transcripción completa, filename, identificadores
 técnicos ni metadatos ASR. Un SHA-256 de `interaction_id` y `updated_at` ordenados
-determina si el resumen es `missing`, `ready` o `stale`. `GET` nunca llama al LLM; un
+junto con la igualdad entre la timezone persistida y `APP_TIMEZONE` determina si el
+resumen es `missing`, `ready` o `stale`. `GET` nunca llama al LLM; un
 POST explícito genera o regenera. Antes de guardar se recalcula el fingerprint, de modo
-que si cambia durante la llamada externa se rechaza el resultado desactualizado.
+que si cambia durante la llamada externa se rechaza el resultado desactualizado. No es
+serialización fuerte: existe una ventana mínima entre esa comprobación y el commit;
+una lectura posterior vuelve a calcular el fingerprint y marcaría el resumen `stale`.
 
 La petición espera al resultado. La inferencia se ejecuta en un hilo del mismo
 proceso; no hay worker separado. Solo se permite una inferencia; las peticiones

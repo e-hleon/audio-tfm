@@ -9,13 +9,14 @@ personales ni se versionaron audio, modelos, respuestas o credenciales.
 Con PostgreSQL 16 real y Alembic aplicado desde una base vacía:
 
 ```text
-57 passed, 1 warning
+58 passed, 1 warning
 ```
 
 Los tests usan transcriptor y generador LLM falsos: no requieren GPU, clave de
 OpenAI ni llamadas externas. Cubren la agregación cronológica, UTC/Madrid/DST,
 `missing`/`ready`/`stale`, regeneración, carrera de fingerprint, fallos seguros de
-LLM y base de datos, y la proyección privada enviada al resumen diario.
+LLM y base de datos, invalidez por cambio de `APP_TIMEZONE` con el mismo fingerprint,
+y la proyección privada enviada al resumen diario.
 
 ## Ejecución real de extremo a extremo
 

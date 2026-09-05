@@ -149,7 +149,8 @@ curl --fail-with-body -X POST "$API_URL/days/2026-09-05/summary"
 `GET /days/{fecha}` no llama a OpenAI. Devuelve las interacciones cronológicas y
 las decisiones, tareas y recordatorios ya extraídos, además del estado del resumen:
 `missing` cuando no existe, `ready` cuando corresponde a los datos actuales y
-`stale` cuando se añadió o modificó una interacción después de generarlo.
+`stale` cuando se añadió o modificó una interacción después de generarlo o cuando
+fue generado con otra `APP_TIMEZONE`.
 
 `POST /days/{fecha}/summary` genera o regenera explícitamente un `DailySummaryResult`
 con `summary` y `topics`. Para reducir datos enviados, OpenAI recibe solo hora local,
@@ -252,7 +253,9 @@ En el diario, el fingerprint SHA-256 contiene únicamente `interaction_id` y
 `updated_at`, ordenados de forma estable. Detecta altas o cambios sin volver a hashear
 transcripciones o JSON completos. El resumen se escribe solo si ese fingerprint sigue
 siendo igual después de la llamada externa; así no se presenta como vigente un resumen
-hecho con datos antiguos.
+hecho con datos antiguos. Esta comprobación reduce la carrera habitual, aunque queda
+una ventana mínima entre la comprobación final y el commit; una lectura posterior
+volverá a evaluar el fingerprint y marcará `stale` si los datos cambiaron.
 
 Para defender el incremento: explicar inferencia frente a entrenamiento, RAM
 frente a VRAM, descarga de pesos frente a envío de datos, y carga del modelo frente

@@ -183,7 +183,14 @@ def create_app(transcriber_factory=Transcriber, analyzer_factory=OpenAIAnalyzer,
         if summary is None:
             return DailySummaryState(status="missing", result=None, generated_at=None, model=None)
         return DailySummaryState(
-            status="ready" if summary.source_fingerprint == fingerprint else "stale",
+            status=(
+                "ready"
+                if (
+                    summary.source_fingerprint == fingerprint
+                    and summary.timezone == app.state.settings.app_timezone
+                )
+                else "stale"
+            ),
             result=DailySummaryResult.model_validate(summary.result),
             generated_at=to_utc(summary.generated_at),
             model=summary.llm_model,
