@@ -104,8 +104,12 @@ class VoiceEnrollmentRecorder(private val context: Context) {
 
 data class PendingSegment(val file: File, val recordedAt: Instant)
 class SegmentQueue(private val directory: File, private val maxSegments: Int = 20) {
-    init { directory.mkdirs() }
     private val pending = ArrayDeque<PendingSegment>()
+    init {
+        directory.mkdirs()
+        directory.listFiles { file -> file.name.startsWith("segment-") && file.extension == "wav" }
+            ?.sortedBy { it.name }?.forEachIndexed { index, file -> if (index < maxSegments) pending.addLast(PendingSegment(file, Instant.now())) else file.delete() }
+    }
     @Synchronized fun offer(segment: PendingSegment): Boolean { if (pending.size >= maxSegments) return false; pending.addLast(segment); return true }
     @Synchronized fun poll(): PendingSegment? = pending.removeFirstOrNull()
     @Synchronized fun requeue(segment: PendingSegment) { if (pending.size < maxSegments) pending.addFirst(segment) }
