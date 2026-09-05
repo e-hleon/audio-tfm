@@ -2,7 +2,8 @@
 
 Automatizado previsto: tests JVM para estados, UTC, borrado temporal y Retry; y
 MockWebServer para multipart y parseo. CI ejecuta `testDebugUnitTest`, `lintDebug` y
-`assembleDebug` con JDK 17.
+`assembleDebug` con JDK 17. La validación local de 2026-09-05 completó esos tres
+comandos correctamente con SDK 35 y JDK 17 temporales.
 
 Se añadió un smoke instrumentado Compose que comprueba los controles iniciales sin
 usar hardware. En este entorno no hay AVD/KVM configurado, por lo que no se ejecutó;
