@@ -85,8 +85,9 @@ No se implementan Android, workers separados, Redis/RQ ni PostgreSQL. Docker
 Compose define un único servicio, sin infraestructura adicional. El LLM externo
 se incorpora como llamada de texto síncrona porque es el objetivo de este incremento.
 
-El diario, análisis y persistencia siguen siendo objetivos del proyecto completo;
-no son funcionalidades de este incremento. Una cola se reconsiderará cuando los
+El diario completo, la cronología y la persistencia siguen siendo objetivos del
+proyecto completo; el análisis estructurado ya forma parte de este incremento.
+Una cola se reconsiderará cuando los
 tiempos de espera o la recuperación de trabajos constituyan requisitos reales.
 El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
 la validación usó 8001 para convivir con un servicio anterior.
