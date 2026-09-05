@@ -275,3 +275,17 @@ modelo y configuración.
 - [Decisión de análisis estructurado](docs/decisions/002-structured-llm-analysis.md)
 - [Validación del análisis](docs/validation/structured-analysis.md)
 - [Documentación oficial de faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+
+## Captura Android avanzada
+
+La app también ofrece Histórico y Día, además de captura manual, continua e
+inteligente. Manual conserva `MediaRecorder`/M4A. Continua usa `AudioRecord` PCM16
+mono a 16 kHz, `ForegroundService`, notificación persistente, STOP explícito y
+chunks WAV de 30 s que se suben de uno en uno desde una cola privada acotada.
+
+Inteligente es experimental: usa frames de 20 ms, VAD energético adaptativo, un
+pre-roll de aproximadamente un segundo y una plantilla acústica local registrada
+explícitamente. Puede omitir voz o aceptar audio incorrectamente; no es seguridad
+biométrica. El detalle técnico está en [arquitectura](docs/architecture.md),
+[ADR 006](docs/decisions/006-continuous-android-capture.md) y
+[ADR 007](docs/decisions/007-smart-selective-capture.md).

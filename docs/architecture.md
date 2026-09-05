@@ -126,6 +126,42 @@ este incremento. Quedan fuera la captura Android, procesamiento asíncrono y fun
 de usuario final más amplias.
 Una cola se reconsiderará cuando los
 tiempos de espera o la recuperación de trabajos constituyan requisitos reales.
+
+## Captura Android avanzada
+
+La app mantiene tres superficies: Captura, Histórico y Día. La captura manual usa
+`MediaRecorder` y M4A porque solo necesita un archivo final corto. Las sesiones
+continuas e inteligentes usan `AudioRecord` PCM16 mono a 16 kHz dentro de
+`CaptureForegroundService`: una notificación persistente y una acción STOP hacen
+visible la captura aunque la Activity deje de estar en primer plano.
+
+El audio PCM se procesa en frames de 20 ms y se escribe en WAV en chunks de 30 s,
+por debajo del límite HTTP de 60 s. La subida es secuencial y los archivos fallidos
+permanecen en una cola privada acotada de `cacheDir`; no hay retries automáticos ni
+idempotencia todavía, por lo que el reintento debe ser explícito. El servicio no se
+inicia automáticamente.
+
+El modo inteligente es experimental: un ring buffer de 1 s aporta pre-roll, un VAD
+energético adaptativo descarta silencio y solo entonces se aplica una similitud
+coseno contra una plantilla acústica local creada mediante enrollment explícito. La
+plantilla no es autenticación, no identifica a terceros y nunca se envía al backend.
+Si falta enrollment, el modo no comienza. El umbral actual es provisional y debe
+calibrarse con audio consentido; no se presentan métricas de speaker sin medición.
+
+```mermaid
+flowchart LR
+  A[MediaRecorder manual] --> B[M4A /process]
+  C[AudioRecord PCM16] --> D{modo}
+  D --> E[Continuo: chunks WAV 30 s]
+  D --> F[Inteligente: VAD + pre-roll]
+  E --> G[cola privada acotada]
+  F --> G
+  G --> H[upload secuencial]
+  H --> I[FastAPI /process]
+  I --> J[Whisper CUDA]
+  J --> K[OpenAI solo texto]
+  K --> L[PostgreSQL]
+```
 El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
 la validación usó 8001 para convivir con un servicio anterior.
 La decisión se documenta en [ADR 001](decisions/001-synchronous-transcription-mvp.md).

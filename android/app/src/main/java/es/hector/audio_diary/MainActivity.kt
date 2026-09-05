@@ -23,7 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     private val viewModel by viewModels<CaptureViewModel> { object : ViewModelProvider.Factory { @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>) = CaptureViewModel(MediaRecorderAudioRecorder(this@MainActivity), RetrofitBackendRepository()) as T } }
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); clearAbandonedCaptures(cacheDir); setContent { AudioDiaryScreen(viewModel, getPreferences(Context.MODE_PRIVATE)) } }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); clearAbandonedCaptures(cacheDir); setContent { DiaryApp(viewModel, RetrofitBackendRepository(), getSharedPreferences("audio_diary", Context.MODE_PRIVATE)) } }
     override fun onStop() { viewModel.cancelIfRecording(); super.onStop() }
 }
 
@@ -46,5 +46,5 @@ class MainActivity : ComponentActivity() {
         }
     } }
 }
-@Composable private fun ReadyActions(onSend: () -> Unit, onDiscard: () -> Unit) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = onSend, modifier = Modifier.weight(1f)) { Text("Enviar") }; OutlinedButton(onClick = onDiscard, modifier = Modifier.weight(1f)) { Text("Descartar") } } }
-@Composable private fun Result(response: ProcessResponse) { Text("Procesado", style = MaterialTheme.typography.titleLarge); Text("Resumen: ${response.analysis.summary}"); Text("Transcripción: ${response.transcription.text}"); Text("Temas: ${response.analysis.topics.joinToString()}"); Text("Decisiones: ${response.analysis.decisions.joinToString { it.text }}"); Text("Tareas: ${response.analysis.tasks.joinToString { it.text }}"); Text("Recordatorios: ${response.analysis.reminders.joinToString { it.text }}") }
+@Composable fun ReadyActions(onSend: () -> Unit, onDiscard: () -> Unit) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = onSend, modifier = Modifier.weight(1f)) { Text("Enviar") }; OutlinedButton(onClick = onDiscard, modifier = Modifier.weight(1f)) { Text("Descartar") } } }
+@Composable fun Result(response: ProcessResponse) { Text("Procesado", style = MaterialTheme.typography.titleLarge); Text("Resumen: ${response.analysis.summary}"); Text("Transcripción: ${response.transcription.text}"); Text("Temas: ${response.analysis.topics.joinToString()}"); Text("Decisiones: ${response.analysis.decisions.joinToString { it.text }}"); Text("Tareas: ${response.analysis.tasks.joinToString { it.text }}"); Text("Recordatorios: ${response.analysis.reminders.joinToString { it.text }}") }
