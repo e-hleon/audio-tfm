@@ -1,5 +1,7 @@
 """Contratos validados de la API de análisis."""
-from typing import Annotated
+from datetime import date, datetime
+from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -32,6 +34,45 @@ class AnalysisResult(StrictModel):
     decisions: list[Decision]
     tasks: list[Task]
     reminders: list[Reminder]
+
+
+class DailySummaryResult(StrictModel):
+    summary: str
+    topics: list[str]
+
+
+class InteractionTranscription(StrictModel):
+    text: str
+    language: str | None
+    model: str
+    device: str | None
+    compute_type: str | None
+
+
+class InteractionResponse(StrictModel):
+    id: UUID
+    recorded_at: datetime
+    created_at: datetime
+    transcription: InteractionTranscription
+    analysis: AnalysisResult
+    analysis_model: str | None
+
+
+class DailySummaryState(StrictModel):
+    status: Literal["missing", "ready", "stale"]
+    result: DailySummaryResult | None
+    generated_at: datetime | None
+    model: str | None
+
+
+class DayResponse(StrictModel):
+    day: date
+    timezone: str
+    interactions: list[InteractionResponse]
+    decisions: list[Decision]
+    tasks: list[Task]
+    reminders: list[Reminder]
+    summary: DailySummaryState
 
 
 class AnalysisRequest(StrictModel):

@@ -6,3 +6,6 @@ ctranslate2==4.6.0
 # faster-whisper 1.2.0 uses the requests-based Hub API (before Hub 1.x).
 huggingface-hub==0.34.4
 openai==2.26.0
+SQLAlchemy==2.0.41
+psycopg[binary]==3.2.9
+alembic==1.16.4

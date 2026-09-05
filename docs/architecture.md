@@ -6,8 +6,10 @@ El alcance completo del diario permanece en `scope.md`.
 
 ## Componentes
 
-Un servicio Docker Compose `api` contiene FastAPI, Uvicorn, faster-whisper y la
-SDK oficial de OpenAI. OpenAI es un proveedor externo, no un contenedor adicional.
+Docker Compose contiene un servicio `api` y PostgreSQL 16. La API contiene FastAPI,
+Uvicorn, faster-whisper y la SDK oficial de OpenAI; OpenAI es un proveedor externo,
+no un contenedor adicional. PostgreSQL conserva las interacciones y resúmenes cuando
+la capa de aplicación los utiliza.
 Uvicorn inicia un único proceso y el ciclo de vida de FastAPI carga una instancia
 Whisper `base` en CUDA con `int8_float16`. Si no se puede cargar, falla el arranque.
 
@@ -20,6 +22,15 @@ Archivo → POST /transcriptions (multipart/form-data)
 
 Texto → POST /analyses (JSON) → Responses API OpenAI → AnalysisResult
 Audio → POST /process → transcripción local → solo texto a OpenAI → JSON conjunto
+
+`POST /process` persiste la interacción después de ASR y análisis. `GET
+/interactions/{id}` recupera una interacción y `GET /interactions` ofrece un
+histórico paginado con filtros temporales. `/transcriptions` y `/analyses` siguen
+siendo operaciones sin persistencia.
+
+GET /days/{YYYY-MM-DD} → interacciones locales ordenadas + agregación determinista
+                       + estado missing|ready|stale
+POST /days/{YYYY-MM-DD}/summary → datos derivados → Responses API → DailySummary
 ```
 
 `app/main.py` gestiona HTTP, límites, exclusión mutua y cierre del archivo.
@@ -33,14 +44,38 @@ tareas y recordatorios. La API recibe o produce estos contratos y el proveedor u
 el JSON Schema generado con Structured Outputs estricto. Así, un proveedor local
 posterior puede implementar `Analyzer` sin cambiar rutas HTTP.
 
+La persistencia síncrona se organiza en `app/db.py`, `app/models.py` y
+`app/repositories.py`, con SQLAlchemy 2.x y psycopg. Alembic es la única fuente de
+migraciones; no se usa `create_all()` en el arranque. `AnalysisResult` se conserva
+como JSONB para mantener el contrato completo sin introducir tablas hijas prematuras.
+Los timestamps se almacenan con zona horaria y se normalizan a UTC; `APP_TIMEZONE`
+define el intervalo local `[inicio, siguiente inicio)` que agrupa el diario, incluidos
+los días de 23 o 25 horas por DST. `recorded_at` sitúa la interacción en el diario;
+`created_at` indica cuándo se guardó.
+
+El resumen diario no vuelve a extraer decisiones, tareas ni recordatorios: los agrega
+en el orden cronológico de los `AnalysisResult` JSONB ya persistidos. El resumen
+narrativo usa su contrato propio `DailySummaryResult` (`summary`, `topics`). Solo se
+envía a OpenAI una proyección derivada: hora local, resumen, temas, decisiones, tareas
+y recordatorios. No incluye audio, transcripción completa, filename, identificadores
+técnicos ni metadatos ASR. Un SHA-256 de `interaction_id` y `updated_at` ordenados
+junto con la igualdad entre la timezone persistida y `APP_TIMEZONE` determina si el
+resumen es `missing`, `ready` o `stale`. `GET` nunca llama al LLM; un
+POST explícito genera o regenera. Antes de guardar se recalcula el fingerprint, de modo
+que si cambia durante la llamada externa se rechaza el resultado desactualizado. No es
+serialización fuerte: existe una ventana mínima entre esa comprobación y el commit;
+una lectura posterior vuelve a calcular el fingerprint y marcaría el resumen `stale`.
+
 La petición espera al resultado. La inferencia se ejecuta en un hilo del mismo
 proceso; no hay worker separado. Solo se permite una inferencia; las peticiones
 simultáneas reciben 503. `GET /health` permanece disponible y comunica la carga
 del modelo, sin sustituir una prueba real de transcripción.
 
 El audio nunca abandona el contenedor para análisis. Solamente la cadena `text`
-resultante de ASR se pasa a `OpenAIAnalyzer`. La llamada usa Responses API con
-`store=false` y limita la salida a 1000 tokens. Esto evita que la respuesta quede
+resultante de ASR se pasa a `OpenAIAnalyzer` para el análisis por interacción. El
+resumen diario recibe solo datos derivados de esa estructura. Las llamadas usan
+Responses API con `store=false` y limitan la salida a 1000 tokens para análisis y 500
+para el resumen diario. Esto evita que la respuesta quede
 disponible como recurso recuperable y acota coste/tamaño, pero no afirma ni garantiza
 cero retención. Los Data Controls del proyecto o cuenta son una configuración
 separada que puede permitir compartir inputs y outputs. No se escriben textos,
@@ -81,15 +116,18 @@ se traducen sin exponer detalles: autenticación 502, límite 429, tiempo agotad
 
 ## Diferencias frente a la propuesta anterior
 
-No se implementan Android, workers separados, Redis/RQ ni PostgreSQL. Docker
-Compose define un único servicio, sin infraestructura adicional. El LLM externo
+No se implementan Android, workers separados ni Redis/RQ. Docker Compose define la
+API y PostgreSQL, sin infraestructura adicional. El LLM externo
 se incorpora como llamada de texto síncrona porque es el objetivo de este incremento.
 
-El diario completo, la cronología y la persistencia siguen siendo objetivos del
-proyecto completo; el análisis estructurado ya forma parte de este incremento.
+El diario diario, la cronología básica y los resúmenes persistidos ya forman parte de
+este incremento. Quedan fuera la captura Android, procesamiento asíncrono y funciones
+de usuario final más amplias.
 Una cola se reconsiderará cuando los
 tiempos de espera o la recuperación de trabajos constituyan requisitos reales.
 El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
 la validación usó 8001 para convivir con un servicio anterior.
 La decisión se documenta en [ADR 001](decisions/001-synchronous-transcription-mvp.md).
 La decisión de análisis está en [ADR 002](decisions/002-structured-llm-analysis.md).
+La base de persistencia está documentada en [ADR 003](decisions/003-persistence-foundation.md).
+El resumen diario está documentado en [ADR 004](decisions/004-daily-summary.md).
