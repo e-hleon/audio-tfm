@@ -34,6 +34,16 @@ class BackendTest {
         val file = File.createTempFile("audio", ".m4a")
         try { RetrofitBackendRepository().process(CapturedAudio(file, Instant.now()), server.url("/").toString()); fail("Expected failure") } catch (_: Exception) {} finally { file.delete(); server.shutdown() }
     }
+    @Test fun reads_health_history_day_and_explicit_summary_endpoints() = runBlocking {
+        val server = MockWebServer(); server.start()
+        server.enqueue(MockResponse().setBody("{\"status\":\"ready\",\"analysis_configured\":false}"))
+        server.enqueue(MockResponse().setBody("[]"))
+        server.enqueue(MockResponse().setBody("{\"day\":\"2026-09-05\",\"timezone\":\"UTC\",\"interactions\":[],\"decisions\":[],\"tasks\":[],\"reminders\":[],\"summary\":{\"status\":\"missing\",\"result\":null,\"generated_at\":null,\"model\":null}}"))
+        server.enqueue(MockResponse().setBody("{\"status\":\"ready\",\"result\":{\"summary\":\"ok\",\"topics\":[]},\"generated_at\":null,\"model\":\"test\"}"))
+        val repo = RetrofitBackendRepository(); val url = server.url("/").toString()
+        assertEquals("ready", repo.health(url).status); assertTrue(repo.interactions(url).isEmpty()); assertEquals("missing", repo.day(url, "2026-09-05").summary.status); assertEquals("ready", repo.generateSummary(url, "2026-09-05").status)
+        assertEquals("/health", server.takeRequest().path); assertEquals("/interactions?limit=50&offset=0", server.takeRequest().path); assertEquals("/days/2026-09-05", server.takeRequest().path); assertEquals("POST", server.takeRequest().method); server.shutdown()
+    }
     private fun assertFails(block: () -> Unit) { try { block(); fail("Expected failure") } catch (_: Exception) {} }
     private val responseJson = """{"interaction_id":"id-1","recorded_at":"2026-09-05T10:00:00Z","created_at":"2026-09-05T10:01:00Z","transcription":{"text":"hola","language":"es","model":"base","device":"cuda","compute_type":"int8_float16"},"analysis":{"summary":"resumen","topics":["tema"],"decisions":[{"text":"d","evidence":"e"}],"tasks":[{"text":"t","assignee":null,"due_date":null,"evidence":"e"}],"reminders":[{"text":"r","when":null,"evidence":"e"}]}}"""
 }
