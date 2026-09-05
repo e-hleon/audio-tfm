@@ -147,7 +147,7 @@ class SmartSegmenter(
     fun accept(frame: ShortArray): SmartSegment? {
         val speech = vad.isSpeech(frame, state == SmartState.SPEECH || state == SmartState.ENDING)
         if (state == SmartState.SILENCE) { preRoll.add(frame); if (speech) { state = SmartState.POSSIBLE_SPEECH; segmentStart = clock(); current.addAll(preRoll.snapshot().toList()); speechFrames = 1 } }
-        else { current.addAll(frame.toList()); if (speech) { speechFrames++; silentFrames = 0; state = SmartState.SPEECH } else if (state == SmartState.SPEECH) { silentFrames++; state = SmartState.ENDING } }
+        else { current.addAll(frame.toList()); if (speech) { speechFrames++; silentFrames = 0; state = SmartState.SPEECH } else if (state == SmartState.SPEECH || state == SmartState.POSSIBLE_SPEECH || state == SmartState.ENDING) { silentFrames++; state = SmartState.ENDING } }
         val close = (state == SmartState.ENDING && silentFrames >= endingSilenceFrames && speechFrames >= minimumSpeechFrames) || current.size >= maximumFrames * AUDIO_FRAME_SAMPLES
         if (close) return finish()
         return null
