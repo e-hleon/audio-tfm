@@ -1,8 +1,8 @@
 # Audio TFM
 
-Primer incremento del diario personal: archivo de audio → FastAPI →
-faster-whisper local en CUDA → JSON. No incluye análisis, persistencia ni cliente
-Android. El alcance general sigue en [docs/scope.md](docs/scope.md).
+MVP del diario personal: audio → transcripción local CUDA → análisis estructurado.
+No incluye persistencia, cliente Android, colas ni servicios adicionales. El alcance
+general sigue en [docs/scope.md](docs/scope.md).
 
 **Transcripción real por HTTP verificada en una RTX 3050 Laptop de 4 GB.**
 Modelo `base`, `int8_float16`, ejecución CUDA y 10 tests automatizados correctos.
@@ -29,6 +29,8 @@ se utilizó 8001 porque un servicio anterior ocupaba 8000:
 ```bash
 export API_PORT=8001
 export API_URL="http://127.0.0.1:${API_PORT}"
+cp .env.example .env
+# Editar .env localmente y establecer OPENAI_API_KEY si se usará análisis.
 ```
 
 Compose usa 8000 si no se establece `API_PORT`. Conservar estas variables en la
@@ -64,10 +66,60 @@ La respuesta espera a la transcripción completa. El modelo se carga una vez;
 no se debe aumentar `--workers` ni usar recarga automática para estas pruebas.
 `/health` indica que el modelo ha cargado, pero por sí solo no demuestra inferencia.
 
+## Análisis estructurado externo
+
+La transcripción se realiza localmente. Para analizar el contenido, solo se envía
+**el texto de la transcripción** a OpenAI; el audio nunca se envía a ese proveedor.
+Configurar la clave exclusivamente en `.env`, que está ignorado por Git:
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6-luna
+```
+
+`gpt-5.6-luna` se eligió porque la documentación oficial lo presenta para cargas
+sensibles a coste y lo ofrece en Responses API. Cada llamada usa `store=false` y
+Structured Outputs con JSON Schema estricto. `store=false` evita crear una respuesta
+recuperable mediante la API, pero no equivale a una garantía de cero retención.
+Consultar las políticas de datos de OpenAI antes de usar contenido personal.
+
+La API inicia sin clave y `/transcriptions` sigue disponible. `/analyses` y
+`/process` devuelven 503 hasta configurar la clave. La respuesta de `/health` indica
+`analysis_configured` sin revelar la clave.
+
+```bash
+curl --fail-with-body "$API_URL/analyses" \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Decidimos publicar la propuesta. Ana la preparará. Recuérdame revisarla el lunes."}'
+
+curl --fail-with-body --max-time 240 \
+  -F 'file=@/ruta/a/grabacion.wav' \
+  "$API_URL/process"
+```
+
+`POST /analyses` recibe `{ "text": "..." }` y `POST /process` devuelve la
+transcripción y su análisis sin repetir la lógica ASR. El análisis contiene:
+
+```json
+{
+  "summary": "...",
+  "topics": ["..."],
+  "decisions": [{"text": "...", "evidence": "..."}],
+  "tasks": [{"text": "...", "assignee": null, "due_date": null, "evidence": "..."}],
+  "reminders": [{"text": "...", "when": null, "evidence": "..."}]
+}
+```
+
+Las listas vacías expresan que no hay evidencia suficiente. `evidence` debe ser un
+fragmento breve del texto; las fechas sin contexto se devuelven como `null`.
+La API no registra texto, prompts ni respuestas de análisis: solo modelo, latencia y
+tokens cuando OpenAI los proporciona. El coste externo depende de los tokens de la
+transcripción, de la respuesta y del precio vigente del modelo.
+
 ## Pruebas
 
 Tests automatizados de API, errores, cierre de temporales, concurrencia,
-decodificación y duración; no descargan modelo ni necesitan GPU:
+decodificación, duración y análisis; no llaman a OpenAI ni necesitan GPU:
 
 ```bash
 docker build --target test -t audio-tfm-tests .
@@ -127,8 +179,8 @@ Detener con `docker compose down`; conserva los pesos para el siguiente arranque
 - Se admite lo que pueda decodificar PyAV; el formato de prueba prioritario es WAV.
 - Los temporales de subida se cierran al acabar, incluso ante errores. `/tmp` del
   contenedor es memoria temporal limitada; no se guardan audios ni transcripciones.
-- El modelo requiere descarga inicial. El procesamiento del contenido es local;
-  no se llama a proveedores externos para transcribir.
+- El modelo requiere descarga inicial. No se llama a proveedores externos para
+  transcribir. El análisis LLM, cuando se configura, sí transmite texto a OpenAI.
 - No hay recuperación de trabajos tras reinicios ni garantía de transcripción
   exacta. Se ha verificado el flujo con una muestra pública en inglés; todavía
   falta una evaluación sistemática de precisión en español, latencia y VRAM.
@@ -158,4 +210,6 @@ modelo y configuración.
 
 - [Arquitectura implementada](docs/architecture.md)
 - [Decisión del incremento](docs/decisions/001-synchronous-transcription-mvp.md)
+- [Decisión de análisis estructurado](docs/decisions/002-structured-llm-analysis.md)
+- [Validación del análisis](docs/validation/structured-analysis.md)
 - [Documentación oficial de faster-whisper](https://github.com/SYSTRAN/faster-whisper)

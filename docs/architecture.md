@@ -1,4 +1,4 @@
-# Arquitectura del primer incremento de transcripción
+# Arquitectura de transcripción y análisis estructurado
 
 Estado: transcripción HTTP real con CUDA y tests verificados.
 Evidencia en [validación](validation/mvp-transcription.md).
@@ -6,7 +6,8 @@ El alcance completo del diario permanece en `scope.md`.
 
 ## Componentes
 
-Un servicio Docker Compose `api` contiene FastAPI, Uvicorn y faster-whisper.
+Un servicio Docker Compose `api` contiene FastAPI, Uvicorn, faster-whisper y la
+SDK oficial de OpenAI. OpenAI es un proveedor externo, no un contenedor adicional.
 Uvicorn inicia un único proceso y el ciclo de vida de FastAPI carga una instancia
 Whisper `base` en CUDA con `int8_float16`. Si no se puede cargar, falla el arranque.
 
@@ -16,6 +17,9 @@ Archivo → POST /transcriptions (multipart/form-data)
          FastAPI → faster-whisper / CTranslate2 → GPU NVIDIA
                ↓
          JSON: text, language, model, device, compute_type
+
+Texto → POST /analyses (JSON) → Responses API OpenAI → AnalysisResult
+Audio → POST /process → transcripción local → solo texto a OpenAI → JSON conjunto
 ```
 
 `app/main.py` gestiona HTTP, límites, exclusión mutua y cierre del archivo.
@@ -23,10 +27,22 @@ Archivo → POST /transcriptions (multipart/form-data)
 modelo hasta obtener el texto. El dispositivo y tipo de cálculo de la respuesta
 se consultan al modelo efectivo.
 
+`app/analysis.py` contiene el proveedor OpenAI y el protocolo mínimo `Analyzer`.
+`app/schemas.py` contiene los contratos Pydantic: `AnalysisResult`, decisiones,
+tareas y recordatorios. La API recibe o produce estos contratos y el proveedor usa
+el JSON Schema generado con Structured Outputs estricto. Así, un proveedor local
+posterior puede implementar `Analyzer` sin cambiar rutas HTTP.
+
 La petición espera al resultado. La inferencia se ejecuta en un hilo del mismo
 proceso; no hay worker separado. Solo se permite una inferencia; las peticiones
 simultáneas reciben 503. `GET /health` permanece disponible y comunica la carga
 del modelo, sin sustituir una prueba real de transcripción.
+
+El audio nunca abandona el contenedor para análisis. Solamente la cadena `text`
+resultante de ASR se pasa a `OpenAIAnalyzer`. La llamada usa Responses API con
+`store=false`; esto evita que la respuesta quede disponible como recurso recuperable
+de Responses, pero no afirma ni garantiza cero retención. No se escriben textos,
+prompts ni respuestas LLM en logs.
 
 ## Datos y límites
 
@@ -54,12 +70,17 @@ Los tests usan un transcriptor simulado para el contrato HTTP y el decodificador
 real para entradas inválidas y duración. `scripts/smoke_test.py` prueba el servicio
 por HTTP con un audio real y exige metadatos CUDA.
 
+`openai` añade la SDK oficial. `OPENAI_API_KEY` y `OPENAI_MODEL` se pasan mediante
+entorno; la clave no se persiste ni se expone. Sin clave, la API inicia y la
+transcripción funciona; los endpoints LLM devuelven 503. Los errores de proveedor
+se traducen sin exponer detalles: autenticación 502, límite 429, tiempo agotado
+504, red 503 y salida inválida o incompleta 502.
+
 ## Diferencias frente a la propuesta anterior
 
-No se implementan Android, workers separados, Redis/RQ, PostgreSQL ni LLM.
-Su inclusión inicial no se justifica para devolver una transcripción en una
-petición. Se mantienen pruebas desde este incremento, en lugar de posponerlas.
-Docker Compose define un único servicio, sin infraestructura adicional.
+No se implementan Android, workers separados, Redis/RQ ni PostgreSQL. Docker
+Compose define un único servicio, sin infraestructura adicional. El LLM externo
+se incorpora como llamada de texto síncrona porque es el objetivo de este incremento.
 
 El diario, análisis y persistencia siguen siendo objetivos del proyecto completo;
 no son funcionalidades de este incremento. Una cola se reconsiderará cuando los
@@ -67,3 +88,4 @@ tiempos de espera o la recuperación de trabajos constituyan requisitos reales.
 El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
 la validación usó 8001 para convivir con un servicio anterior.
 La decisión se documenta en [ADR 001](decisions/001-synchronous-transcription-mvp.md).
+La decisión de análisis está en [ADR 002](decisions/002-structured-llm-analysis.md).
