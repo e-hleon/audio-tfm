@@ -40,9 +40,12 @@ del modelo, sin sustituir una prueba real de transcripción.
 
 El audio nunca abandona el contenedor para análisis. Solamente la cadena `text`
 resultante de ASR se pasa a `OpenAIAnalyzer`. La llamada usa Responses API con
-`store=false`; esto evita que la respuesta quede disponible como recurso recuperable
-de Responses, pero no afirma ni garantiza cero retención. No se escriben textos,
-prompts ni respuestas LLM en logs.
+`store=false` y limita la salida a 1000 tokens. Esto evita que la respuesta quede
+disponible como recurso recuperable y acota coste/tamaño, pero no afirma ni garantiza
+cero retención. Los Data Controls del proyecto o cuenta son una configuración
+separada que puede permitir compartir inputs y outputs. No se escriben textos,
+prompts ni respuestas LLM en logs. Después del JSON Schema se comprueba que cada
+`evidence` aparece literalmente en el texto de entrada.
 
 ## Datos y límites
 

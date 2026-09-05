@@ -21,9 +21,11 @@ de texto JSON informal generado por un prompt.
 ## Decisión
 
 Elegir la cuarta opción con la SDK oficial `openai`, modelo configurable
-`OPENAI_MODEL` y valor inicial `gpt-5.6-luna`. La documentación oficial lo sitúa
-como modelo sensible a coste y disponible en Responses API. Se usan `store=false`,
-JSON Schema estricto y validación Pydantic posterior.
+`OPENAI_MODEL` y valor inicial `gpt-5.4-mini`, que es el modelo usado en la
+validación real. Se usan `store=false`, un máximo de 1000 tokens de salida (el
+esquema breve del MVP no necesita más y así se acotan coste y tamaño), JSON Schema
+estricto y validación Pydantic posterior. Además, cada evidencia se valida como
+subcadena literal del texto original.
 
 Se introduce el protocolo mínimo `Analyzer`; OpenAI es su primera implementación.
 La API conserva un proceso y añade `/analyses` y `/process`. Este último reutiliza
@@ -34,8 +36,9 @@ una extracción conservadora y evidencia literal breve.
 
 El audio permanece local, pero la transcripción se transmite a OpenAI cuando se
 solicita análisis. `store=false` evita almacenar la respuesta como recurso de
-Responses recuperable; no implica por sí mismo cero retención. Por ello la interfaz
-y documentación informan del flujo y no se registran textos ni prompts.
+Responses recuperable; no implica por sí mismo cero retención. Los Data Controls del
+proyecto o cuenta son independientes y pueden permitir compartir inputs/outputs. Por
+ello la interfaz y documentación informan del flujo y no se registran textos ni prompts.
 
 Hay coste, latencia y disponibilidad externos. Sin `OPENAI_API_KEY`, la
 transcripción sigue operativa y el análisis devuelve 503. La API traduce errores

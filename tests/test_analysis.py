@@ -11,6 +11,7 @@ from app.analysis import (
     AnalysisNotConfigured,
     AnalysisRateLimited,
     AnalysisTimedOut,
+    MAX_OUTPUT_TOKENS,
     OpenAIAnalyzer,
 )
 from app.schemas import AnalysisRequest, AnalysisResult
@@ -54,17 +55,32 @@ def test_openai_request_sends_only_text_and_uses_strict_schema(monkeypatch):
     calls = []
     analyzer.client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(
         status="completed", output_text=AnalysisResult.model_validate(payload()).model_dump_json(),
-        model="gpt-5.6-luna", usage=SimpleNamespace(input_tokens=10, output_tokens=20),
+        model="gpt-5.4-mini-2026-03-17", usage=SimpleNamespace(input_tokens=10, output_tokens=20),
     )))
 
-    result = analyzer.analyze("Ana preparará una propuesta.")
+    source = "Decidimos preparar una propuesta. Ana preparará una propuesta. Recuérdame revisarla el lunes."
+    result = analyzer.analyze(source)
     assert result.tasks[0].assignee == "Ana"
     request = calls[0]
-    assert request["input"] == "Ana preparará una propuesta."
+    assert request["input"] == source
     assert "audio" not in request
     assert request["store"] is False
+    assert request["max_output_tokens"] == MAX_OUTPUT_TOKENS
     assert request["text"]["format"]["type"] == "json_schema"
     assert request["text"]["format"]["strict"] is True
+
+
+def test_openai_rejects_evidence_not_present_in_source(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    analyzer = OpenAIAnalyzer()
+    invalid = payload()
+    invalid["tasks"][0]["evidence"] = "Esta frase no aparece"
+    analyzer.client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(
+        status="completed", output_text=AnalysisResult.model_validate(invalid).model_dump_json(),
+        model="gpt-5.4-mini-2026-03-17", usage=None,
+    )))
+    with pytest.raises(AnalysisInvalidResponse, match="evidencia"):
+        analyzer.analyze("Decidimos preparar una propuesta. Ana preparará una propuesta. Recuérdame revisarla el lunes.")
 
 
 def test_openai_analyzer_requires_configuration(monkeypatch):

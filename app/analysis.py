@@ -42,6 +42,12 @@ class AnalysisIncomplete(AnalysisError):
     pass
 
 
+DEFAULT_MODEL = "gpt-5.4-mini"
+# The MVP schema contains short summaries and lists; this bounds cost and response
+# size while leaving enough room for a useful analysis.
+MAX_OUTPUT_TOKENS = 1000
+
+
 class Analyzer(Protocol):
     def analyze(self, text: str) -> AnalysisResult: ...
 
@@ -58,7 +64,7 @@ class OpenAIAnalyzer:
     """Proveedor inicial, sustituible mediante el pequeño protocolo Analyzer."""
 
     def __init__(self):
-        self.model = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+        self.model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
         api_key = os.getenv("OPENAI_API_KEY")
         self.client = OpenAI(api_key=api_key, timeout=30.0) if api_key else None
 
@@ -76,6 +82,7 @@ class OpenAIAnalyzer:
             response = self.client.responses.create(
                 model=self.model,
                 store=False,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
                 instructions=INSTRUCTIONS,
                 input=text,
                 text={
@@ -90,7 +97,7 @@ class OpenAIAnalyzer:
         except AuthenticationError as exc:
             raise AnalysisAuthenticationFailed("OpenAI rechazó las credenciales") from exc
         except RateLimitError as exc:
-            raise AnalysisRateLimited("OpenAI ha limitado temporalmente las solicitudes") from exc
+            raise AnalysisRateLimited("OpenAI rechazó la solicitud por límite o cuota") from exc
         except APITimeoutError as exc:
             raise AnalysisTimedOut("OpenAI agotó el tiempo de espera") from exc
         except APIConnectionError as exc:
@@ -104,6 +111,12 @@ class OpenAIAnalyzer:
             result = AnalysisResult.model_validate_json(response.output_text)
         except (ValueError, json.JSONDecodeError) as exc:
             raise AnalysisInvalidResponse("OpenAI devolvió una estructura inválida") from exc
+
+        for item in (*result.decisions, *result.tasks, *result.reminders):
+            if not item.evidence.strip() or item.evidence not in text:
+                raise AnalysisInvalidResponse(
+                    "OpenAI devolvió una evidencia que no aparece literalmente en el texto"
+                )
 
         usage = response.usage
         logging.getLogger("uvicorn.error").info(

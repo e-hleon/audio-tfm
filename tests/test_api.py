@@ -165,6 +165,8 @@ def test_analyses_maps_provider_errors_without_details(api, error, status):
     response = client.post("/analyses", json={"text": "Texto público"})
     assert response.status_code == status
     assert "Texto público" not in response.text
+    if status == 429:
+        assert "límite de peticiones o cuota insuficiente" in response.json()["detail"]
 
 
 def test_process_reuses_transcription_and_sends_its_text_only(api):

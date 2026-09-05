@@ -5,7 +5,7 @@ Estado: validación real completada.
 ## Plan de evidencia
 
 - Ejecutado: `docker run --rm --entrypoint python3 audio-tfm-tests -m pytest -q`.
-  Resultado: **31 passed**, una advertencia de deprecación de Starlette/AnyIO.
+  Resultado: **32 passed**, una advertencia de deprecación de Starlette/AnyIO.
   Incluye esquema, endpoints, errores y flujo `/process` con un analizador simulado;
   no requiere red, GPU ni clave OpenAI.
 - La instancia Docker arrancó con `analysis_configured=true`, CUDA y
@@ -25,6 +25,10 @@ Estado: validación real completada.
   `OPENAI_MODEL=gpt-5.4-mini`. La llamada sintética usó 458 tokens de entrada,
   181 de salida y 1924 ms. `/process` usó 431 tokens de entrada, 51 de salida y
   1187 ms.
+- En la ronda de endurecimiento, una salida que parafraseaba `evidence` fue rechazada
+  determinísticamente con HTTP 502; una nota sintética sin elementos accionables y el
+  flujo `/process` con JFK pasaron después de la corrección. Las llamadas mantienen
+  `store=false` y `max_output_tokens=1000`.
 
 ## Privacidad y Git
 

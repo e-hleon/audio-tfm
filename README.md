@@ -5,7 +5,7 @@ No incluye persistencia, cliente Android, colas ni servicios adicionales. El alc
 general sigue en [docs/scope.md](docs/scope.md).
 
 **Transcripción real por HTTP verificada en una RTX 3050 Laptop de 4 GB.**
-Modelo `base`, `int8_float16`, ejecución CUDA y 10 tests automatizados correctos.
+Modelo `base`, `int8_float16`, ejecución CUDA y 32 tests automatizados correctos.
 Véase la evidencia y sus límites en el [registro de validación](docs/validation/mvp-transcription.md).
 
 ## Requisitos
@@ -74,14 +74,17 @@ Configurar la clave exclusivamente en `.env`, que está ignorado por Git:
 
 ```dotenv
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.6-luna
+OPENAI_MODEL=gpt-5.4-mini
 ```
 
-`gpt-5.6-luna` se eligió porque la documentación oficial lo presenta para cargas
-sensibles a coste y lo ofrece en Responses API. Cada llamada usa `store=false` y
-Structured Outputs con JSON Schema estricto. `store=false` evita crear una respuesta
-recuperable mediante la API, pero no equivale a una garantía de cero retención.
-Consultar las políticas de datos de OpenAI antes de usar contenido personal.
+`gpt-5.4-mini` es la configuración validada y sigue siendo configurable mediante
+`OPENAI_MODEL`. Cada llamada usa `store=false`, Structured Outputs con JSON Schema
+estricto y un límite de 1000 tokens de salida: el esquema del MVP contiene campos
+breves, y el límite acota coste y tamaño de respuesta. `store=false` evita crear una
+respuesta recuperable mediante la API, pero no equivale a cero retención. Los Data
+Controls del proyecto o la cuenta son una configuración distinta y pueden permitir
+compartir entradas y salidas según la política elegida; revísalos antes de usar datos
+personales.
 
 La API inicia sin clave y `/transcriptions` sigue disponible. `/analyses` y
 `/process` devuelven 503 hasta configurar la clave. La respuesta de `/health` indica
@@ -111,7 +114,8 @@ transcripción y su análisis sin repetir la lógica ASR. El análisis contiene:
 ```
 
 Las listas vacías expresan que no hay evidencia suficiente. `evidence` debe ser un
-fragmento breve del texto; las fechas sin contexto se devuelven como `null`.
+fragmento breve que aparezca literalmente en el texto de entrada; si no aparece, la
+respuesta del proveedor se considera inválida. Las fechas sin contexto se devuelven como `null`.
 La API no registra texto, prompts ni respuestas de análisis: solo modelo, latencia y
 tokens cuando OpenAI los proporciona. El coste externo depende de los tokens de la
 transcripción, de la respuesta y del precio vigente del modelo.

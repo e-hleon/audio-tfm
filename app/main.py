@@ -75,7 +75,10 @@ def create_app(transcriber_factory=Transcriber, analyzer_factory=OpenAIAnalyzer)
         except AnalysisAuthenticationFailed as exc:
             raise HTTPException(502, "OpenAI rechazó las credenciales configuradas") from exc
         except AnalysisRateLimited as exc:
-            raise HTTPException(429, "OpenAI ha limitado temporalmente las solicitudes") from exc
+            raise HTTPException(
+                429,
+                "OpenAI no puede procesar la solicitud por límite de peticiones o cuota insuficiente",
+            ) from exc
         except AnalysisTimedOut as exc:
             raise HTTPException(504, "OpenAI agotó el tiempo de espera") from exc
         except AnalysisNetworkFailed as exc:
