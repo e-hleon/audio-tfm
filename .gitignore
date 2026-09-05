@@ -29,6 +29,10 @@ tmp/
 .idea/
 *:Zone.Identifier
 .pytest_cache/
+android/.gradle/
+android/**/build/
+android/local.properties
+android/*.apk
 *.ogg
 *.aac
 *.webm

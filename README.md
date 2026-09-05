@@ -16,6 +16,8 @@ Véase la evidencia y sus límites en el [registro de validación](docs/validati
 - GPU NVIDIA; configuración inicial prevista para una RTX 3050 Laptop de 4 GB.
 - Internet para descargar imagen, paquetes y modelo la primera vez.
 - Un puerto local libre (8000 por defecto); `curl` y Python 3 para las pruebas desde el host.
+- Android Studio reciente o JDK 17 para el proyecto [android/](android/). La app usa
+  Kotlin 2.0.21, AGP 8.6.1, compile/target SDK 35 y minSdk 26.
 
 No hace falta instalar Python ni CUDA en el host para ejecutar la API.
 El contenedor usa CUDA 12.3.2 y cuDNN 9; las versiones directas de Python están
@@ -44,6 +46,11 @@ docker compose build --no-cache
 docker compose up -d
 docker compose logs -f api
 ```
+
+Para probar desde un teléfono en una LAN de confianza, usar
+`API_BIND_HOST=0.0.0.0` y la IP LAN del PC como URL en la app. Por defecto se mantiene
+`127.0.0.1`; no existe autenticación, por lo que nunca se debe exponer ese puerto a
+Internet.
 
 PostgreSQL 16 se ejecuta como servicio Compose y conserva sus datos en el volumen
 `postgres_data`. La primera migración se aplica explícitamente antes de usar la

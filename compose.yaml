@@ -4,7 +4,7 @@ services:
       context: .
       target: runtime
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8000}:8000"
     environment:
       WHISPER_MODEL: base
       WHISPER_COMPUTE_TYPE: int8_float16

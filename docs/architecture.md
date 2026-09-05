@@ -117,7 +117,8 @@ se traducen sin exponer detalles: autenticación 502, límite 429, tiempo agotad
 ## Diferencias frente a la propuesta anterior
 
 No se implementan Android, workers separados ni Redis/RQ. Docker Compose define la
-API y PostgreSQL, sin infraestructura adicional. El LLM externo
+API y PostgreSQL, sin infraestructura adicional. Android incorpora solo captura manual
+en primer plano y envía audio temporal con `recorded_at` UTC a `/process`; el LLM externo
 se incorpora como llamada de texto síncrona porque es el objetivo de este incremento.
 
 El diario diario, la cronología básica y los resúmenes persistidos ya forman parte de
