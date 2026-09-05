@@ -27,6 +27,10 @@ Audio → POST /process → transcripción local → solo texto a OpenAI → JSO
 /interactions/{id}` recupera una interacción y `GET /interactions` ofrece un
 histórico paginado con filtros temporales. `/transcriptions` y `/analyses` siguen
 siendo operaciones sin persistencia.
+
+GET /days/{YYYY-MM-DD} → interacciones locales ordenadas + agregación determinista
+                       + estado missing|ready|stale
+POST /days/{YYYY-MM-DD}/summary → datos derivados → Responses API → DailySummary
 ```
 
 `app/main.py` gestiona HTTP, límites, exclusión mutua y cierre del archivo.
@@ -45,7 +49,19 @@ La persistencia síncrona se organiza en `app/db.py`, `app/models.py` y
 migraciones; no se usa `create_all()` en el arranque. `AnalysisResult` se conserva
 como JSONB para mantener el contrato completo sin introducir tablas hijas prematuras.
 Los timestamps se almacenan con zona horaria y se normalizan a UTC; `APP_TIMEZONE`
-se reserva para calcular días locales.
+define el intervalo local `[inicio, siguiente inicio)` que agrupa el diario, incluidos
+los días de 23 o 25 horas por DST. `recorded_at` sitúa la interacción en el diario;
+`created_at` indica cuándo se guardó.
+
+El resumen diario no vuelve a extraer decisiones, tareas ni recordatorios: los agrega
+en el orden cronológico de los `AnalysisResult` JSONB ya persistidos. El resumen
+narrativo usa su contrato propio `DailySummaryResult` (`summary`, `topics`). Solo se
+envía a OpenAI una proyección derivada: hora local, resumen, temas, decisiones, tareas
+y recordatorios. No incluye audio, transcripción completa, filename, identificadores
+técnicos ni metadatos ASR. Un SHA-256 de `interaction_id` y `updated_at` ordenados
+determina si el resumen es `missing`, `ready` o `stale`. `GET` nunca llama al LLM; un
+POST explícito genera o regenera. Antes de guardar se recalcula el fingerprint, de modo
+que si cambia durante la llamada externa se rechaza el resultado desactualizado.
 
 La petición espera al resultado. La inferencia se ejecuta en un hilo del mismo
 proceso; no hay worker separado. Solo se permite una inferencia; las peticiones
@@ -53,8 +69,10 @@ simultáneas reciben 503. `GET /health` permanece disponible y comunica la carga
 del modelo, sin sustituir una prueba real de transcripción.
 
 El audio nunca abandona el contenedor para análisis. Solamente la cadena `text`
-resultante de ASR se pasa a `OpenAIAnalyzer`. La llamada usa Responses API con
-`store=false` y limita la salida a 1000 tokens. Esto evita que la respuesta quede
+resultante de ASR se pasa a `OpenAIAnalyzer` para el análisis por interacción. El
+resumen diario recibe solo datos derivados de esa estructura. Las llamadas usan
+Responses API con `store=false` y limitan la salida a 1000 tokens para análisis y 500
+para el resumen diario. Esto evita que la respuesta quede
 disponible como recurso recuperable y acota coste/tamaño, pero no afirma ni garantiza
 cero retención. Los Data Controls del proyecto o cuenta son una configuración
 separada que puede permitir compartir inputs y outputs. No se escriben textos,
@@ -99,9 +117,9 @@ No se implementan Android, workers separados ni Redis/RQ. Docker Compose define 
 API y PostgreSQL, sin infraestructura adicional. El LLM externo
 se incorpora como llamada de texto síncrona porque es el objetivo de este incremento.
 
-El diario completo, la cronología y los resúmenes diarios siguen siendo objetivos
-del proyecto completo; la persistencia de interacciones y el histórico básico ya
-forman parte de este incremento.
+El diario diario, la cronología básica y los resúmenes persistidos ya forman parte de
+este incremento. Quedan fuera la captura Android, procesamiento asíncrono y funciones
+de usuario final más amplias.
 Una cola se reconsiderará cuando los
 tiempos de espera o la recuperación de trabajos constituyan requisitos reales.
 El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
@@ -109,3 +127,4 @@ la validación usó 8001 para convivir con un servicio anterior.
 La decisión se documenta en [ADR 001](decisions/001-synchronous-transcription-mvp.md).
 La decisión de análisis está en [ADR 002](decisions/002-structured-llm-analysis.md).
 La base de persistencia está documentada en [ADR 003](decisions/003-persistence-foundation.md).
+El resumen diario está documentado en [ADR 004](decisions/004-daily-summary.md).

@@ -2,11 +2,12 @@
 
 MVP del diario personal: audio → transcripción local CUDA → análisis estructurado.
 La base de persistencia incluye PostgreSQL para interacciones y resúmenes diarios.
-`/process` persiste las interacciones y el histórico se consulta mediante `/interactions`.
+`/process` persiste las interacciones, el histórico se consulta mediante `/interactions`
+y el diario local mediante `/days/{YYYY-MM-DD}`.
 El alcance general sigue en [docs/scope.md](docs/scope.md).
 
 **Transcripción real por HTTP verificada en una RTX 3050 Laptop de 4 GB.**
-Modelo `base`, `int8_float16`, ejecución CUDA y 32 tests automatizados correctos.
+Modelo `base`, `int8_float16`, ejecución CUDA y 57 tests automatizados correctos.
 Véase la evidencia y sus límites en el [registro de validación](docs/validation/mvp-transcription.md).
 
 ## Requisitos
@@ -134,6 +135,30 @@ La API no registra texto, prompts ni respuestas de análisis: solo modelo, laten
 tokens cuando OpenAI los proporciona. El coste externo depende de los tokens de la
 transcripción, de la respuesta y del precio vigente del modelo.
 
+## Diario diario
+
+`recorded_at` determina el día de cada interacción. El instante se conserva en UTC,
+pero el día se calcula con `APP_TIMEZONE` (por defecto `UTC`) como el intervalo
+`[inicio local, siguiente inicio local)`, por lo que también respeta cambios DST.
+
+```bash
+curl --fail "$API_URL/days/2026-09-05"
+curl --fail-with-body -X POST "$API_URL/days/2026-09-05/summary"
+```
+
+`GET /days/{fecha}` no llama a OpenAI. Devuelve las interacciones cronológicas y
+las decisiones, tareas y recordatorios ya extraídos, además del estado del resumen:
+`missing` cuando no existe, `ready` cuando corresponde a los datos actuales y
+`stale` cuando se añadió o modificó una interacción después de generarlo.
+
+`POST /days/{fecha}/summary` genera o regenera explícitamente un `DailySummaryResult`
+con `summary` y `topics`. Para reducir datos enviados, OpenAI recibe solo hora local,
+resumen, temas, decisiones, tareas y recordatorios de cada interacción; nunca audio,
+transcripciones completas, filename, metadatos ASR ni identificadores técnicos. La
+llamada mantiene `store=false`, Structured Outputs estricto y un máximo de 500 tokens
+de salida, suficiente para ese contrato breve. Si el día cambia mientras OpenAI
+responde, el resultado no se guarda y se devuelve 409 para reintentarlo.
+
 ## Pruebas
 
 Tests automatizados de API, errores, cierre de temporales, concurrencia,
@@ -199,6 +224,9 @@ Detener con `docker compose down`; conserva los pesos para el siguiente arranque
   contenedor es memoria temporal limitada; no se guardan audios ni transcripciones.
 - El modelo requiere descarga inicial. No se llama a proveedores externos para
   transcribir. El análisis LLM, cuando se configura, sí transmite texto a OpenAI.
+- PostgreSQL guarda transcripciones y análisis JSONB de las interacciones, además de
+  resúmenes diarios. El volumen `postgres_data` conserva esos datos al recrear el
+  contenedor; no guarda audio ni filename.
 - No hay recuperación de trabajos tras reinicios ni garantía de transcripción
   exacta. Se ha verificado el flujo con una muestra pública en inglés; todavía
   falta una evaluación sistemática de precisión en español, latencia y VRAM.
@@ -219,6 +247,12 @@ La petición es síncrona porque el cliente espera al texto. Un hilo del mismo
 proceso ejecuta el cálculo para mantener disponible `/health`; no es un worker
 independiente ni un sistema de trabajos persistentes. Un bloqueo de exclusión
 mutua impide dos inferencias a la vez.
+
+En el diario, el fingerprint SHA-256 contiene únicamente `interaction_id` y
+`updated_at`, ordenados de forma estable. Detecta altas o cambios sin volver a hashear
+transcripciones o JSON completos. El resumen se escribe solo si ese fingerprint sigue
+siendo igual después de la llamada externa; así no se presenta como vigente un resumen
+hecho con datos antiguos.
 
 Para defender el incremento: explicar inferencia frente a entrenamiento, RAM
 frente a VRAM, descarga de pesos frente a envío de datos, y carga del modelo frente

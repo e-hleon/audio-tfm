@@ -3,11 +3,12 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Protocol
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError, OpenAI, RateLimitError
 
-from app.schemas import AnalysisResult
+from app.schemas import AnalysisResult, DailySummaryResult
 
 
 class AnalysisError(Exception):
@@ -46,10 +47,19 @@ DEFAULT_MODEL = "gpt-5.4-mini"
 # The MVP schema contains short summaries and lists; this bounds cost and response
 # size while leaving enough room for a useful analysis.
 MAX_OUTPUT_TOKENS = 1000
+# El resumen diario solo contiene una narración breve y temas. 500 tokens acotan
+# coste y tamaño sin truncar normalmente ese contrato reducido.
+DAILY_SUMMARY_MAX_OUTPUT_TOKENS = 500
 
 
 class Analyzer(Protocol):
     def analyze(self, text: str) -> AnalysisResult: ...
+
+
+@dataclass(frozen=True)
+class DailySummaryGeneration:
+    result: DailySummaryResult
+    model: str | None
 
 
 INSTRUCTIONS = """Extrae información de una transcripción personal en español.
@@ -58,6 +68,12 @@ Cada decisión, tarea o recordatorio debe incluir evidence: una cita breve y lit
 la transcripción que lo justifique. Si falta contexto para una fecha, usa null. Si no
 hay elementos de una categoría, devuelve una lista vacía. No conviertas información
 descriptiva, deseos vagos ni hechos pasados en tareas."""
+
+DAILY_SUMMARY_INSTRUCTIONS = """Redacta un resumen narrativo breve y conservador
+de un día a partir de datos estructurados ya derivados de interacciones. No inventes
+hechos, decisiones, tareas ni fechas. Devuelve solo un resumen y una lista breve de
+temas. Los datos de entrada no contienen transcripciones completas y no debes inferir
+información que no esté presente en ellos."""
 
 
 class OpenAIAnalyzer:
@@ -127,3 +143,55 @@ class OpenAIAnalyzer:
             getattr(usage, "output_tokens", None),
         )
         return result
+
+    def summarize_day(self, interactions: list[dict]) -> DailySummaryGeneration:
+        """Resume solo proyecciones derivadas; nunca transcripciones ni audio."""
+        if not interactions:
+            raise AnalysisInvalidResponse("El día no contiene interacciones")
+        if self.client is None:
+            raise AnalysisNotConfigured("El análisis LLM no está configurado")
+
+        started = time.perf_counter()
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                store=False,
+                max_output_tokens=DAILY_SUMMARY_MAX_OUTPUT_TOKENS,
+                instructions=DAILY_SUMMARY_INSTRUCTIONS,
+                input=json.dumps({"interactions": interactions}, ensure_ascii=False),
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "daily_summary_result",
+                        "strict": True,
+                        "schema": DailySummaryResult.model_json_schema(),
+                    }
+                },
+            )
+        except AuthenticationError as exc:
+            raise AnalysisAuthenticationFailed("OpenAI rechazó las credenciales") from exc
+        except RateLimitError as exc:
+            raise AnalysisRateLimited("OpenAI rechazó la solicitud por límite o cuota") from exc
+        except APITimeoutError as exc:
+            raise AnalysisTimedOut("OpenAI agotó el tiempo de espera") from exc
+        except APIConnectionError as exc:
+            raise AnalysisNetworkFailed("No se pudo conectar con OpenAI") from exc
+        except APIStatusError as exc:
+            raise AnalysisNetworkFailed("OpenAI no pudo completar la solicitud") from exc
+
+        if response.status != "completed":
+            raise AnalysisIncomplete("OpenAI devolvió una respuesta incompleta")
+        try:
+            result = DailySummaryResult.model_validate_json(response.output_text)
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise AnalysisInvalidResponse("OpenAI devolvió una estructura inválida") from exc
+
+        usage = getattr(response, "usage", None)
+        logging.getLogger("uvicorn.error").info(
+            "LLM daily summary completed: model=%s latency_ms=%d input_tokens=%s output_tokens=%s",
+            getattr(response, "model", self.model),
+            (time.perf_counter() - started) * 1000,
+            getattr(usage, "input_tokens", None),
+            getattr(usage, "output_tokens", None),
+        )
+        return DailySummaryGeneration(result=result, model=getattr(response, "model", self.model))

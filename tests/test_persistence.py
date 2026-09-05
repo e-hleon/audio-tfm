@@ -18,8 +18,10 @@ from app.repositories import (
 )
 from app.settings import Settings
 from app.time_utils import day_interval, ensure_aware, to_utc
+import app.main as main_module
 from app.main import create_app
-from app.schemas import AnalysisResult
+from app.analysis import AnalysisNetworkFailed, DailySummaryGeneration
+from app.schemas import AnalysisResult, DailySummaryResult
 
 
 def test_settings_validate_timezone(monkeypatch):
@@ -83,11 +85,42 @@ class HttpFakeTranscriber:
 class HttpFakeAnalyzer:
     model = "fake-llm"
 
+    def __init__(self, on_summary=None):
+        self.daily_inputs = []
+        self.on_summary = on_summary
+        self.summary_error = None
+
     def available(self):
         return True
 
     def analyze(self, text):
         return AnalysisResult(summary="Resumen persistido", topics=["persistencia"], decisions=[], tasks=[], reminders=[])
+
+    def summarize_day(self, interactions):
+        self.daily_inputs.append(interactions)
+        if self.summary_error:
+            raise self.summary_error
+        if self.on_summary:
+            self.on_summary()
+        return DailySummaryGeneration(
+            result=DailySummaryResult(summary="Resumen del día", topics=["persistencia"]),
+            model="fake-daily-llm",
+        )
+
+
+def rich_interaction_values(recorded_at, transcription="Texto sintético"):
+    values = interaction_values(recorded_at)
+    values["transcription"] = transcription
+    values["analysis"] = {
+        "summary": "Se aprobó el plan.",
+        "topics": ["plan"],
+        "decisions": [{"text": "Aprobar el plan", "evidence": "Aprobamos el plan."}],
+        "tasks": [{"text": "Enviar el plan", "assignee": "Ana", "due_date": None,
+                   "evidence": "Ana enviará el plan."}],
+        "reminders": [{"text": "Revisar el plan", "when": "lunes",
+                       "evidence": "Recuérdame el plan el lunes."}],
+    }
+    return values
 
 
 def test_migration_created_expected_tables(db_engine):
@@ -237,3 +270,131 @@ def test_http_history_limit_offset_and_timezone_filters(db_engine, session):
         assert semi_open.status_code == 200
         assert len(semi_open.json()) == 2
         assert client.get("/interactions", params={"from": "2026-09-05T12:00:00"}).status_code == 422
+
+
+def test_day_empty_is_missing_and_summary_rejects_empty_day(db_engine, session):
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        response = client.get("/days/2026-09-05")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["interactions"] == []
+        assert body["decisions"] == []
+        assert body["tasks"] == []
+        assert body["reminders"] == []
+        assert body["summary"]["status"] == "missing"
+        assert client.post("/days/2026-09-05/summary").status_code == 409
+
+
+def test_day_aggregates_chronologically_and_persists_ready_summary(db_engine, session):
+    late = create_interaction(session, **rich_interaction_values(datetime(2026, 9, 5, 11, tzinfo=timezone.utc)))
+    early = create_interaction(session, **rich_interaction_values(datetime(2026, 9, 5, 8, tzinfo=timezone.utc)))
+    session.commit()
+    analyzer = HttpFakeAnalyzer()
+    with TestClient(create_app(HttpFakeTranscriber, lambda: analyzer, lambda: Session(db_engine))) as client:
+        missing = client.get("/days/2026-09-05")
+        assert missing.json()["summary"]["status"] == "missing"
+        assert [item["id"] for item in missing.json()["interactions"]] == [str(early.id), str(late.id)]
+        assert len(missing.json()["decisions"]) == 2
+        assert len(missing.json()["tasks"]) == 2
+        assert len(missing.json()["reminders"]) == 2
+
+        generated = client.post("/days/2026-09-05/summary")
+        assert generated.status_code == 200
+        assert generated.json()["status"] == "ready"
+        assert generated.json()["model"] == "fake-daily-llm"
+        ready = client.get("/days/2026-09-05")
+        assert ready.json()["summary"]["status"] == "ready"
+        assert ready.json()["summary"]["result"]["summary"] == "Resumen del día"
+
+
+def test_day_summary_only_receives_derived_data_and_stales_then_regenerates(db_engine, session):
+    create_interaction(
+        session,
+        **rich_interaction_values(
+            datetime(2026, 9, 5, 10, tzinfo=timezone.utc),
+            transcription="TRANSCRIPCION PRIVADA QUE NUNCA DEBE SALIR",
+        ),
+    )
+    session.commit()
+    analyzer = HttpFakeAnalyzer()
+    with TestClient(create_app(HttpFakeTranscriber, lambda: analyzer, lambda: Session(db_engine))) as client:
+        assert client.post("/days/2026-09-05/summary").status_code == 200
+        derived = analyzer.daily_inputs[0][0]
+        assert set(derived) == {"local_time", "summary", "topics", "decisions", "tasks", "reminders"}
+        assert "TRANSCRIPCION PRIVADA" not in str(analyzer.daily_inputs)
+
+        added = create_interaction(
+            session,
+            **rich_interaction_values(datetime(2026, 9, 5, 12, tzinfo=timezone.utc)),
+        )
+        session.commit()
+        assert client.get("/days/2026-09-05").json()["summary"]["status"] == "stale"
+        assert client.post("/days/2026-09-05/summary").json()["status"] == "ready"
+
+        added.updated_at = added.updated_at + timedelta(seconds=1)
+        session.commit()
+        assert client.get("/days/2026-09-05").json()["summary"]["status"] == "stale"
+
+
+def test_day_uses_madrid_local_day_and_dst(db_engine, session, monkeypatch):
+    monkeypatch.setenv("APP_TIMEZONE", "Europe/Madrid")
+    before_local_midnight = create_interaction(
+        session, **interaction_values(datetime(2026, 9, 4, 21, 59, tzinfo=timezone.utc))
+    )
+    in_local_day = create_interaction(
+        session, **interaction_values(datetime(2026, 9, 4, 22, tzinfo=timezone.utc))
+    )
+    dst_day = create_interaction(
+        session, **interaction_values(datetime(2026, 3, 29, 21, 30, tzinfo=timezone.utc))
+    )
+    session.commit()
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        result = client.get("/days/2026-09-05").json()
+        assert result["timezone"] == "Europe/Madrid"
+        assert [item["id"] for item in result["interactions"]] == [str(in_local_day.id)]
+        dst = client.get("/days/2026-03-29").json()
+        assert [item["id"] for item in dst["interactions"]] == [str(dst_day.id)]
+    assert before_local_midnight.id != in_local_day.id
+
+
+def test_day_rejects_outdated_generation_when_data_changes_during_llm_call(db_engine, session):
+    create_interaction(session, **rich_interaction_values(datetime(2026, 9, 5, 10, tzinfo=timezone.utc)))
+    session.commit()
+
+    def add_during_generation():
+        with Session(db_engine) as concurrent:
+            create_interaction(concurrent, **rich_interaction_values(datetime(2026, 9, 5, 11, tzinfo=timezone.utc)))
+            concurrent.commit()
+
+    analyzer = HttpFakeAnalyzer(on_summary=add_during_generation)
+    with TestClient(create_app(HttpFakeTranscriber, lambda: analyzer, lambda: Session(db_engine))) as client:
+        response = client.post("/days/2026-09-05/summary")
+        assert response.status_code == 409
+        assert "cambió durante la generación" in response.json()["detail"]
+        assert client.get("/days/2026-09-05").json()["summary"]["status"] == "missing"
+
+
+def test_daily_llm_failure_keeps_previous_summary(db_engine, session):
+    create_interaction(session, **rich_interaction_values(datetime(2026, 9, 5, 10, tzinfo=timezone.utc)))
+    session.commit()
+    analyzer = HttpFakeAnalyzer()
+    with TestClient(create_app(HttpFakeTranscriber, lambda: analyzer, lambda: Session(db_engine))) as client:
+        assert client.post("/days/2026-09-05/summary").status_code == 200
+        analyzer.summary_error = AnalysisNetworkFailed("network")
+        assert client.post("/days/2026-09-05/summary").status_code == 503
+        assert client.get("/days/2026-09-05").json()["summary"]["status"] == "ready"
+
+
+def test_daily_summary_database_failure_is_safe(db_engine, session, monkeypatch):
+    create_interaction(session, **rich_interaction_values(datetime(2026, 9, 5, 10, tzinfo=timezone.utc)))
+    session.commit()
+
+    def fail_upsert(*args, **kwargs):
+        raise OperationalError("insert", {}, RuntimeError("database detail"))
+
+    monkeypatch.setattr(main_module, "upsert_daily_summary", fail_upsert)
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        response = client.post("/days/2026-09-05/summary")
+    assert response.status_code == 503
+    assert "database detail" not in response.text
+    assert "DATABASE_URL" not in response.text

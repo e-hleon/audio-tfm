@@ -11,10 +11,11 @@ from app.analysis import (
     AnalysisNotConfigured,
     AnalysisRateLimited,
     AnalysisTimedOut,
+    DAILY_SUMMARY_MAX_OUTPUT_TOKENS,
     MAX_OUTPUT_TOKENS,
     OpenAIAnalyzer,
 )
-from app.schemas import AnalysisRequest, AnalysisResult
+from app.schemas import AnalysisRequest, AnalysisResult, DailySummaryResult
 
 
 def payload():
@@ -81,6 +82,24 @@ def test_openai_rejects_evidence_not_present_in_source(monkeypatch):
     )))
     with pytest.raises(AnalysisInvalidResponse, match="evidencia"):
         analyzer.analyze("Decidimos preparar una propuesta. Ana preparará una propuesta. Recuérdame revisarla el lunes.")
+
+
+def test_openai_daily_summary_uses_derived_data_only_and_strict_schema(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    analyzer = OpenAIAnalyzer()
+    calls = []
+    analyzer.client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(
+        status="completed", output_text=DailySummaryResult(summary="Resumen", topics=["tema"]).model_dump_json(),
+        model="gpt-5.4-mini-2026-03-17", usage=SimpleNamespace(input_tokens=10, output_tokens=20),
+    )))
+    generation = analyzer.summarize_day([{"local_time": "2026-09-05T10:00+02:00", "summary": "Resumen", "topics": [], "decisions": [], "tasks": [], "reminders": []}])
+    assert generation.model == "gpt-5.4-mini-2026-03-17"
+    request = calls[0]
+    assert request["store"] is False
+    assert request["max_output_tokens"] == DAILY_SUMMARY_MAX_OUTPUT_TOKENS
+    assert request["text"]["format"]["name"] == "daily_summary_result"
+    assert "audio" not in request
+    assert "transcription" not in request["input"]
 
 
 def test_openai_analyzer_requires_configuration(monkeypatch):
