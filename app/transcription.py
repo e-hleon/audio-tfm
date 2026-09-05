@@ -1,0 +1,47 @@
+"""Inferencia local: una instancia CUDA, sin alternativa silenciosa en CPU."""
+import logging
+import os
+
+from faster_whisper import WhisperModel
+from faster_whisper.audio import decode_audio
+
+MAX_SECONDS = 60
+SAMPLE_RATE = 16000
+
+
+class InvalidAudio(ValueError):
+    pass
+
+
+class AudioTooLong(ValueError):
+    pass
+
+
+class Transcriber:
+    def __init__(self):
+        self.model_name = os.getenv("WHISPER_MODEL", "base")
+        self.model = WhisperModel(
+            self.model_name,
+            device="cuda",
+            compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "int8_float16"),
+            download_root="/models",
+        )
+        logging.getLogger("uvicorn.error").info("ASR ready: %s", self.details())
+
+    def details(self):
+        return {"model": self.model_name, "device": self.model.model.device,
+                "compute_type": self.model.model.compute_type}
+
+    def transcribe(self, audio_file):
+        try:
+            audio = decode_audio(audio_file, sampling_rate=SAMPLE_RATE)
+        except (ValueError, EOFError, OSError) as exc:
+            raise InvalidAudio("No se puede decodificar el audio") from exc
+        if not audio.size:
+            raise InvalidAudio("El audio está vacío")
+        if audio.size > MAX_SECONDS * SAMPLE_RATE:
+            raise AudioTooLong("El audio supera los 60 segundos")
+        segments, info = self.model.transcribe(audio, beam_size=5)
+        # La inferencia es diferida: consumir el generador antes de responder.
+        text = "".join(segment.text for segment in segments).strip()
+        return {"text": text, "language": info.language, **self.details()}

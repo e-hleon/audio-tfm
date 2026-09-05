@@ -1,143 +1,69 @@
-# Arquitectura inicial
+# Arquitectura del primer incremento de transcripción
 
-## Principios
+Estado: transcripción HTTP real con CUDA y tests verificados.
+Evidencia en [validación](validation/mvp-transcription.md).
+El alcance completo del diario permanece en `scope.md`.
 
-La arquitectura debe ser:
+## Componentes
 
-- sencilla;
-- modular;
-- reproducible;
-- local-first;
-- fácil de probar;
-- comprensible para el autor del TFM.
+Un servicio Docker Compose `api` contiene FastAPI, Uvicorn y faster-whisper.
+Uvicorn inicia un único proceso y el ciclo de vida de FastAPI carga una instancia
+Whisper `base` en CUDA con `int8_float16`. Si no se puede cargar, falla el arranque.
 
-No se introducirán componentes cuya utilidad no esté justificada por un requisito
-real del proyecto.
+```text
+Archivo → POST /transcriptions (multipart/form-data)
+               ↓
+         FastAPI → faster-whisper / CTranslate2 → GPU NVIDIA
+               ↓
+         JSON: text, language, model, device, compute_type
+```
 
-## Componentes previstos
+`app/main.py` gestiona HTTP, límites, exclusión mutua y cierre del archivo.
+`app/transcription.py` decodifica, valida duración y consume los segmentos del
+modelo hasta obtener el texto. El dispositivo y tipo de cálculo de la respuesta
+se consultan al modelo efectivo.
 
-### Cliente Android
+La petición espera al resultado. La inferencia se ejecuta en un hilo del mismo
+proceso; no hay worker separado. Solo se permite una inferencia; las peticiones
+simultáneas reciben 503. `GET /health` permanece disponible y comunica la carga
+del modelo, sin sustituir una prueba real de transcripción.
 
-Responsable de:
+## Datos y límites
 
-- capturar audio;
-- seleccionar el modo de captura;
-- enviar grabaciones;
-- consultar resultados.
+El parser multipart utiliza un archivo temporal que se cierra explícitamente en
+un bloque `finally`, incluso cuando falla la transcripción. No se copia a un
+archivo persistente ni se registra su contenido. `/tmp` es un tmpfs de 128 MiB.
+Solo los pesos del modelo se conservan en un volumen Docker.
 
-El procesamiento del modo inteligente deberá realizarse localmente en el
-dispositivo antes de enviar audio al backend.
+Se limitan los archivos a 10 MiB después del parsing y el audio a 60 segundos
+después de decodificar. Esto acota el uso normal, pero no impide que una entrada
+hostil consuma recursos durante recepción o decodificación. El MVP está destinado
+a pruebas locales de confianza, con puerto publicado en la interfaz de loopback.
 
-### API
+## Dependencias y despliegue
 
-Backend HTTP desarrollado inicialmente con FastAPI.
+Dockerfile basado en CUDA 12.3.2 con cuDNN 9; CTranslate2 4.6.0 y faster-whisper
+1.2.0 y Hugging Face Hub 0.34.4. Esta combinación se ha validado en una
+RTX 3050 Laptop de 4 GB con driver 555.99. Hub se fija porque la versión 1.x
+no instalaba `requests`, importado por faster-whisper 1.2.0. Las dependencias directas están fijadas; las transitivas
+y paquetes apt no tienen un bloqueo completo, por lo que no se garantiza una
+reconstrucción idéntica byte a byte.
 
-Responsable de:
+El target `test` añade pytest y httpx sin aumentar las dependencias del servicio.
+Los tests usan un transcriptor simulado para el contrato HTTP y el decodificador
+real para entradas inválidas y duración. `scripts/smoke_test.py` prueba el servicio
+por HTTP con un audio real y exige metadatos CUDA.
 
-- recibir grabaciones;
-- crear trabajos de procesamiento;
-- consultar su estado;
-- devolver transcripciones y análisis;
-- consultar la información diaria.
+## Diferencias frente a la propuesta anterior
 
-### Worker
+No se implementan Android, workers separados, Redis/RQ, PostgreSQL ni LLM.
+Su inclusión inicial no se justifica para devolver una transcripción en una
+petición. Se mantienen pruebas desde este incremento, en lugar de posponerlas.
+Docker Compose define un único servicio, sin infraestructura adicional.
 
-Proceso separado encargado de operaciones costosas:
-
-- procesamiento de audio;
-- transcripción;
-- análisis mediante LLM.
-
-Separarlo de la API evita mantener peticiones HTTP abiertas durante procesos
-largos.
-
-### Cola
-
-Se estudiará inicialmente Redis + RQ por su simplicidad.
-
-Su función será desacoplar la recepción de una grabación de su procesamiento.
-
-No se utilizará una tecnología más compleja salvo que aparezca un requisito que
-la justifique.
-
-### Base de datos
-
-PostgreSQL almacenará los metadatos, transcripciones y resultados del análisis.
-
-Los archivos de audio se almacenarán inicialmente en un volumen/directorio local.
-No se utilizará almacenamiento de objetos mientras no exista una necesidad real.
-
-### ASR
-
-Se utilizará inicialmente faster-whisper para realizar transcripción local.
-
-El modelo concreto se elegirá mediante pruebas teniendo en cuenta calidad,
-velocidad y los recursos disponibles.
-
-### LLM
-
-El análisis semántico se realizará mediante una interfaz de proveedor.
-
-Ejemplo conceptual:
-
-LLMProvider
-  - OpenAIProvider
-  - LocalProvider (opcional)
-
-El proveedor externo podrá utilizarse inicialmente para obtener buenos resultados
-sin exigir la ejecución local de un modelo grande.
-
-## Despliegue
-
-La infraestructura del backend se definirá mediante Docker Compose.
-
-Configuración prevista:
-
-- API;
-- worker;
-- Redis;
-- PostgreSQL.
-
-No se utilizará Kubernetes en el alcance inicial.
-
-## Flujo
-
-Android
-  |
-  | audio
-  v
-API
-  |
-  | job
-  v
-Redis/RQ
-  |
-  v
-Worker
-  |
-  +--> ASR local
-  |
-  +--> LLM provider
-  |
-  v
-PostgreSQL
-  |
-  v
-API
-  |
-  v
-Android / interfaz de consulta
-
-## Evolución
-
-Esta arquitectura es inicial.
-
-Las decisiones podrán cambiar si las pruebas muestran que una alternativa es
-claramente más sencilla o adecuada.
-
-Todo cambio arquitectónico significativo deberá documentar:
-
-1. problema encontrado;
-2. alternativas consideradas;
-3. decisión adoptada;
-4. consecuencias.
+El diario, análisis y persistencia siguen siendo objetivos del proyecto completo;
+no son funcionalidades de este incremento. Una cola se reconsiderará cuando los
+tiempos de espera o la recuperación de trabajos constituyan requisitos reales.
+El puerto del host es configurable mediante `API_PORT` (8000 por defecto);
+la validación usó 8001 para convivir con un servicio anterior.
+La decisión se documenta en [ADR 001](decisions/001-synchronous-transcription-mvp.md).

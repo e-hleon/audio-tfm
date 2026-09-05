@@ -28,3 +28,8 @@ tmp/
 .vscode/
 .idea/
 *:Zone.Identifier
+.pytest_cache/
+*.ogg
+*.aac
+*.webm
+*.safetensors
