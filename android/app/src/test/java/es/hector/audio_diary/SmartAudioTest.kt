@@ -46,6 +46,17 @@ class SmartAudioTest {
         verifier.load("NaN,1,2"); assertFalse(verifier.hasEnrollment())
         verifier.enroll(shortArrayOf(0, 0, 0)); assertEquals(0f, verifier.score(shortArrayOf(0, 0, 0)), 0f)
     }
+    @Test fun smart_similarity_instrumentation_emits_only_safe_measurement() {
+        val verifier = AcousticSpeakerSimilarity(); val sample = ShortArray(AUDIO_SAMPLE_RATE / 2) { if (it % 2 == 0) 1_000 else -1_000 }; verifier.enroll(sample)
+        val events = mutableListOf<SmartSimilarityMeasurement>(); val instrumentation = SmartSimilarityInstrumentation(sink = events::add)
+        val measurement = instrumentation.evaluate(sample, verifier)
+        assertEquals("smart_similarity", measurement.event); assertTrue(measurement.score.isFinite()); assertTrue(measurement.accepted); assertEquals(500L, measurement.durationMs); assertEquals(listOf(measurement), events)
+    }
+    @Test fun smart_similarity_instrumentation_marks_below_threshold_without_audio_fields() {
+        val events = mutableListOf<SmartSimilarityMeasurement>(); val instrumentation = SmartSimilarityInstrumentation(sink = events::add)
+        val measurement = instrumentation.evaluate(ShortArray(AUDIO_SAMPLE_RATE / 4), null)
+        assertEquals("smart_similarity", measurement.event); assertEquals(0f, measurement.score); assertFalse(measurement.accepted); assertEquals(250L, measurement.durationMs); assertEquals(listOf(measurement), events)
+    }
     @Test fun queue_rejects_beyond_capacity_and_requeues_failures() {
         val queue = SegmentQueue(createTempDir("queue"), 1); val first = PendingSegment(File.createTempFile("one", ".wav"), Instant.EPOCH); val second = PendingSegment(File.createTempFile("two", ".wav"), Instant.EPOCH)
         assertTrue(queue.offer(first)); assertFalse(queue.offer(second)); assertEquals(first, queue.poll()); queue.requeue(first); assertEquals(1, queue.size); first.file.delete(); second.file.delete()

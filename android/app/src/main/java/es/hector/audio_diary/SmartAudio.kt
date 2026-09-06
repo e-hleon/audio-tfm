@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.time.Instant
@@ -14,12 +15,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 const val AUDIO_SAMPLE_RATE = 16_000
 const val AUDIO_FRAME_MILLIS = 20
 const val AUDIO_FRAME_SAMPLES = AUDIO_SAMPLE_RATE * AUDIO_FRAME_MILLIS / 1_000
 object CaptureStats {
-    fun read(context: Context): String { val p = context.getSharedPreferences("audio_diary", Context.MODE_PRIVATE); return "Detectados ${p.getInt("detected", 0)} · enviados ${p.getInt("sent", 0)} · descartados ${p.getInt("discarded", 0)}" }
+    fun read(context: Context): String {
+        val p = context.getSharedPreferences("audio_diary", Context.MODE_PRIVATE)
+        return "Detectados ${p.getInt("detected", 0)} · enviados ${p.getInt("sent", 0)} · descartados ${p.getInt("discarded", 0)} · SMART sesión: detectados ${p.getInt("detected_session", 0)} · aceptados ${p.getInt("accepted_session", 0)} · descartados ${p.getInt("discarded_session", 0)}"
+    }
 }
 
 interface PcmAudioSource { fun start(); fun read(buffer: ShortArray): Int; fun stopAndRelease() }
@@ -117,6 +122,36 @@ class AcousticSpeakerSimilarity(private var template: FloatArray? = null) {
             .getOrNull()?.takeIf { it.size == 3 && it.all(Float::isFinite) }
     }
     fun clear() { template = null }
+}
+
+data class SmartSimilarityMeasurement(
+    val event: String,
+    val score: Float,
+    val accepted: Boolean,
+    val durationMs: Long,
+)
+
+/** Instrumentación local: nunca incluye audio, texto, features ni identificadores. */
+class SmartSimilarityInstrumentation(
+    private val threshold: Float = .75f,
+    private val sink: (SmartSimilarityMeasurement) -> Unit = { measurement ->
+        if (BuildConfig.DEBUG) Log.d(
+            "SmartSimilarity",
+            "event=${measurement.event} score=${String.format(Locale.US, "%.4f", measurement.score)} accepted=${measurement.accepted} duration_ms=${measurement.durationMs}"
+        )
+    },
+) {
+    fun evaluate(samples: ShortArray, verifier: AcousticSpeakerSimilarity?): SmartSimilarityMeasurement {
+        val score = verifier?.score(samples) ?: 0f
+        val measurement = SmartSimilarityMeasurement(
+            event = "smart_similarity",
+            score = score,
+            accepted = score >= threshold,
+            durationMs = samples.size * 1_000L / AUDIO_SAMPLE_RATE,
+        )
+        sink(measurement)
+        return measurement
+    }
 }
 
 /** Enrollment explícito: solo conserva tres números acústicos en preferencias privadas. */

@@ -43,6 +43,7 @@ class CaptureForegroundService : Service() {
     private var uploadCoordinator: SegmentUploadCoordinator? = null
     private var uploadJob: Job? = null
     private var stopRequested = false
+    private val smartInstrumentation = SmartSimilarityInstrumentation()
 
     override fun onCreate() {
         super.onCreate(); queue = SegmentQueue(File(cacheDir, "pending-segments"))
@@ -56,6 +57,7 @@ class CaptureForegroundService : Service() {
     private fun startCapture(smart: Boolean, backendUrl: String) {
         stopRequested = false
         if (smart) {
+            resetSmartSessionStats()
             smartVerifier = AcousticSpeakerSimilarity().also { it.load(getSharedPreferences("audio_diary", MODE_PRIVATE).getString("speaker_template", "") ?: "") }
             if (smartVerifier?.hasEnrollment() != true) { stopSelf(); return }
         }
@@ -87,11 +89,11 @@ class CaptureForegroundService : Service() {
             while (recordingJob?.isActive != false) {
                 val count = audioSource.read(readBuffer); if (count <= 0) continue
                 val samples = readBuffer.copyOf(count)
-                if (segmenter != null) for (frame in framer.add(samples)) segmenter.accept(frame)?.let { increment("detected"); if ((smartVerifier?.score(it.samples) ?: 0f) >= .75f) saveSegment(it.samples, it.recordedAt) else increment("discarded") }
+                if (segmenter != null) for (frame in framer.add(samples)) segmenter.accept(frame)?.let { handleSmartSegment(it) }
                 else { accumulated.addAll(samples.toList()); if (accumulated.size >= maxSamples) { saveSegment(accumulated.toShortArray(), chunkStart); accumulated.clear(); chunkStart = Instant.now() } }
             }
         } finally {
-            if (segmenter != null) segmenter.stop()?.let { increment("detected"); if ((smartVerifier?.score(it.samples) ?: 0f) >= .75f) saveSegment(it.samples, it.recordedAt) else increment("discarded") }
+            if (segmenter != null) segmenter.stop()?.let { handleSmartSegment(it) }
             else if (accumulated.isNotEmpty()) saveSegment(accumulated.toShortArray(), chunkStart)
             audioSource.stopAndRelease(); recorder = null
         }
@@ -100,6 +102,25 @@ class CaptureForegroundService : Service() {
         if (samples.isEmpty()) return
         val directory = File(cacheDir, "pending-segments"); directory.mkdirs(); val file = File(directory, "segment-${recordedAt.toEpochMilli()}-${UUID.randomUUID()}.wav")
         WavWriter.write(file, samples); if (queue.offer(PendingSegment(file, recordedAt))) { increment("enqueued"); wakeups.trySend(Unit) } else { increment("discarded"); file.delete() }
+    }
+    private fun handleSmartSegment(segment: SmartSegment) {
+        increment("detected")
+        increment("detected_session")
+        val measurement = smartInstrumentation.evaluate(segment.samples, smartVerifier)
+        if (measurement.accepted) {
+            increment("accepted_session")
+            saveSegment(segment.samples, segment.recordedAt)
+        } else {
+            increment("discarded")
+            increment("discarded_session")
+        }
+    }
+    private fun resetSmartSessionStats() {
+        getSharedPreferences("audio_diary", MODE_PRIVATE).edit()
+            .putInt("detected_session", 0)
+            .putInt("accepted_session", 0)
+            .putInt("discarded_session", 0)
+            .apply()
     }
     private suspend fun uploadLoop() {
         wakeups.trySend(Unit)
