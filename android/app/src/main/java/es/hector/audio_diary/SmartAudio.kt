@@ -215,6 +215,7 @@ class SmartSegmenter(
                     current.addAll(preRoll.snapshot().toList())
                     consecutiveSpeechFrames = 1
                     voicedSamples = frame.size
+                    if (consecutiveSpeechFrames >= minimumSpeechFrames) state = SmartState.SPEECH
                 }
             }
             SmartState.POSSIBLE_SPEECH -> {
