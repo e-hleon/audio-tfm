@@ -147,8 +147,8 @@ class SegmentUploadCoordinator(
     private val mutex = Mutex()
 
     suspend fun drain(): Boolean = mutex.withLock {
-        while (true) {
-            val segment = queue.poll() ?: return@withLock true
+        var segment = queue.poll()
+        while (segment != null) {
             try {
                 upload(segment)
                 segment.file.delete()
@@ -157,7 +157,9 @@ class SegmentUploadCoordinator(
                 if (error is CancellationException) throw error
                 return@withLock false
             }
+            segment = queue.poll()
         }
+        true
     }
 }
 
