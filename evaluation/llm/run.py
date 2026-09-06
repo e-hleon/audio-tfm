@@ -49,9 +49,15 @@ def run(fixtures: Path, output_dir: Path, model: str | None, max_cases: int, res
                for category, values in categories.items()}
     all_counts = {key: sum(values[key] for values in categories.values()) for key in ("tp", "fp", "fn")}
     latencies = sorted(r["latency_seconds"] for r in valid)
+    rejection_reasons = {}
+    for row in records:
+        if row.get("status") != "ok":
+            reason = row.get("error_message", "unknown").rsplit("(", 1)[-1].rstrip(")")
+            rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
     effective_models = sorted({r.get("model_effective") for r in valid if r.get("model_effective")})
     summary = {"fixture": str(fixtures), "cases": len(cases), "valid_schema_percent": 100 * len(valid) / len(cases) if cases else 0,
                "failed_calls": len(records) - len(valid), "model_requested": analyzer.model,
+               "rejection_reasons": rejection_reasons,
                "model_effective": effective_models,
                "hardware": platform.platform(), "git_commit": os.popen("git rev-parse HEAD").read().strip(),
                "categories": {**metrics, "micro": {**all_counts, **prf(**all_counts)}},

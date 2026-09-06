@@ -2,7 +2,9 @@
 import json
 import logging
 import os
+import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -64,10 +66,29 @@ class DailySummaryGeneration:
 
 INSTRUCTIONS = """Extrae información de una transcripción personal en español.
 Sé conservador: no inventes decisiones, tareas, responsables, fechas ni recordatorios.
-Cada decisión, tarea o recordatorio debe incluir evidence: una cita breve y literal de
-la transcripción que lo justifique. Si falta contexto para una fecha, usa null. Si no
+Cada decisión, tarea o recordatorio debe incluir evidence. `evidence` DEBE copiar
+exactamente un substring contiguo de la entrada, carácter por carácter: no parafrasees,
+no corrijas mayúsculas, puntuación o espacios, y no uses elipsis. Si falta contexto para una fecha, usa null. Si no
 hay elementos de una categoría, devuelve una lista vacía. No conviertas información
 descriptiva, deseos vagos ni hechos pasados en tareas."""
+
+
+def _evidence_issue(evidence: str, text: str) -> str:
+    """Classify rejected citations without including private text in the error."""
+    if not evidence.strip():
+        return "empty"
+    if evidence in text:
+        return "none"
+    compact = lambda value: " ".join(unicodedata.normalize("NFC", value).lower().split())
+    normalized_evidence, normalized_text = compact(evidence), compact(text)
+    if normalized_evidence in normalized_text:
+        return "case-punctuation-whitespace"
+    words = re.findall(r"\w+", normalized_evidence, flags=re.UNICODE)
+    if len(words) >= 2 and all(word in normalized_text for word in words):
+        return "non-contiguous-or-reordered"
+    if len(evidence) > max(len(text), 1):
+        return "too-long"
+    return "invented-or-unmatched"
 
 DAILY_SUMMARY_INSTRUCTIONS = """Redacta un resumen narrativo breve y conservador
 de un día a partir de datos estructurados ya derivados de interacciones. No inventes
@@ -130,9 +151,10 @@ class OpenAIAnalyzer:
             raise AnalysisInvalidResponse("OpenAI devolvió una estructura inválida") from exc
 
         for item in (*result.decisions, *result.tasks, *result.reminders):
-            if not item.evidence.strip() or item.evidence not in text:
+            issue = _evidence_issue(item.evidence, text)
+            if issue != "none":
                 raise AnalysisInvalidResponse(
-                    "OpenAI devolvió una evidencia que no aparece literalmente en el texto"
+                    f"OpenAI devolvió una evidencia no literal ({issue})"
                 )
 
         usage = response.usage

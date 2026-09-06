@@ -5,7 +5,7 @@ pesos y cachés se guardan en `.evaluation-cache/`, ignorado por Git.
 
 ## ASR
 
-FLEURS (`google/fleurs`, configuración `es_es`, split `validation`) se descarga
+FLEURS (`google/fleurs`, configuración `es_419`, split `validation`) se descarga
 con `datasets`. Su ficha declara licencia CC BY 4.0. Se ordenan los IDs y se aplica
 una permutación con seed `20260905`; se conservan clips con referencia no vacía y
 audio válido, preferentemente los clips cortos del corpus. El manifiesto registra
@@ -45,3 +45,24 @@ python -m evaluation.report
 CI solo ejecuta los tests rápidos (`tests/test_evaluation.py`), sin GPU, corpus real
 ni OpenAI. Los agregados medidos, si existen, se guardan en `docs/evaluation/results`
 y las figuras regenerables en `docs/evaluation/figures`.
+
+El holdout se ejecuta por separado:
+
+```bash
+python -m evaluation.llm.run --fixtures evaluation/fixtures/llm_holdout.jsonl \
+  --output-dir docs/evaluation/results/llm-holdout --max-cases 15
+```
+
+Para ejecutar con el mismo runtime CUDA sin instalar dependencias en WSL:
+
+```bash
+docker build --target eval -t audio-tfm-eval .
+docker run --rm --gpus all -v "$PWD/.evaluation-cache:/app/.evaluation-cache" \
+  -v "$PWD/docs/evaluation:/app/docs/evaluation" audio-tfm-eval \
+  python3 -m evaluation.asr.prepare --limit 50 --seed 20260905
+docker run --rm --gpus all -v "$PWD/.evaluation-cache:/app/.evaluation-cache" \
+  -v "$PWD/docs/evaluation:/app/docs/evaluation" audio-tfm-eval \
+  python3 -m evaluation.asr.run --models base small --limit 50 --device cuda --compute-type int8_float16 --resume
+```
+
+El target es solo evaluación y no modifica la imagen `runtime` de producción.

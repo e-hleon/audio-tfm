@@ -17,7 +17,7 @@ pipeline real `app.transcription.Transcriber`, `device=cuda` y
 línea por muestra para poder reanudar. RTF se define como `inference_seconds /
 audio_duration_seconds`; RTF menor que 1 significa más rápido que tiempo real.
 
-El corpus ASR es [FLEURS](https://huggingface.co/datasets/google/fleurs) español `es_es`, validation, descargado automáticamente y
+El corpus ASR es [FLEURS](https://huggingface.co/datasets/google/fleurs) español `es_419`, validation, descargado automáticamente y
 seleccionado mediante seed fija; el manifiesto conserva IDs. La fuente declara CC BY
 4.0 (consúltese la ficha de `google/fleurs` en Hugging Face). WER y CER se calculan
 tras una normalización conservadora: NFC, minúsculas, puntuación fuera y espacios
@@ -37,12 +37,26 @@ la tabla LLM se encuentran en [`summary-tables.md`](results/summary-tables.md) c
 se han ejecutado los experimentos. Las figuras son `figures/asr-wer.(png|svg)`,
 `figures/asr-rtf.(png|svg)` y `figures/llm-prf.(png|svg)`.
 
-En este entorno de ejecución no se pudo medir todavía el benchmark real: no hay
-acceso CUDA/NVML (`nvidia-smi` informa que el sistema bloquea GPU), no existe
-`OPENAI_API_KEY` y Python no incluye `venv`/`pip` para instalar las dependencias.
-Por tanto no se presentan cifras inventadas. Cuando se ejecute en el entorno del
-TFM, `evaluation.report` leerá los JSON agregados y actualizará esta sección de
-resultados mediante los artefactos generados.
+En esta sesión Docker confirma acceso de cómputo a una NVIDIA RTX 3050 Laptop y la
+imagen reproducible de evaluación se construye correctamente. La preparación de
+FLEURS falló al descargar un artefacto público desde Hugging Face (error de red del
+transporte Xet); el reintento alternativo no completó. La clave no se imprime ni se
+incorpora al repositorio. La ejecución LLM real de 36 fixtures sintéticos sí completó 36 llamadas:
+6 respuestas válidas (16,67 %) y 30 rechazadas por `AnalysisInvalidResponse` porque
+la evidencia devuelta no aparecía literalmente. Modelo efectivo:
+`gpt-5.4-mini-2026-03-17`; latencia media 0,860 s, mediana 0,785 s, p95 0,971 s;
+2.509 tokens de entrada y 306 de salida. El artefacto inicial no guardó subcategorías
+de rechazo, por lo que la causa exacta de cada caso es retrospectivamente no disponible.
+TP/FP/FN y F1 no se interpretan como
+calidad semántica positiva al quedar rechazadas la mayoría de respuestas. Cuando
+FLEURS esté disponible, `evaluation.report` leerá sus JSON agregados.
+
+Tras una instrucción general de copia exacta de substring contiguo, la repetición
+obtuvo 36/36 válidas. Desarrollo: decisions F1=0,783, tasks F1=0,923, reminders
+F1=0,800 y micro F1=0,841 (TP=29, FP=9, FN=2). Latencia posterior: media 1,437 s,
+mediana 1,428 s, p95 1,875 s; 16.256 tokens de entrada y 2.841 de salida. En un
+holdout sintético independiente de 15 casos: 15/15 válidos y micro precision, recall
+y F1=1,000. No debe generalizarse fuera de este corpus pequeño.
 
 ## Interpretación y limitaciones
 

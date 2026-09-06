@@ -1,0 +1,54 @@
+{
+  "fixture": "evaluation/fixtures/llm_holdout.jsonl",
+  "cases": 15,
+  "valid_schema_percent": 100.0,
+  "failed_calls": 0,
+  "model_requested": "gpt-5.4-mini",
+  "rejection_reasons": {},
+  "model_effective": [
+    "gpt-5.4-mini-2026-03-17"
+  ],
+  "hardware": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.35",
+  "git_commit": "",
+  "categories": {
+    "decisions": {
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "tasks": {
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "reminders": {
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "micro": {
+      "tp": 15,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    }
+  },
+  "latency_seconds": {
+    "mean": 1.461802690932139,
+    "median": 1.3072119059943361,
+    "p95": 1.8429947640033788
+  },
+  "input_tokens": 6747,
+  "output_tokens": 1081
+}

@@ -14,4 +14,12 @@ FROM runtime AS test
 COPY requirements-test.txt .
 RUN pip install --no-cache-dir -r requirements-test.txt
 COPY tests ./tests
+COPY evaluation ./evaluation
 CMD ["python3", "-m", "pytest", "-q"]
+
+FROM runtime AS eval
+COPY requirements-eval.txt .
+RUN pip install --no-cache-dir -r requirements-eval.txt
+COPY evaluation ./evaluation
+COPY docs/evaluation ./docs/evaluation
+CMD ["python3", "-m", "evaluation.report"]

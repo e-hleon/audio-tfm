@@ -5,6 +5,12 @@
 !tests/**
 !requirements.txt
 !requirements-test.txt
+!requirements-eval.txt
+!evaluation/
+!evaluation/**
+!docs/
+!docs/evaluation/
+!docs/evaluation/**
 !Dockerfile
 !alembic.ini
 !alembic/

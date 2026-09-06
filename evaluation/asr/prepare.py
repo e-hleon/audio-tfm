@@ -11,7 +11,7 @@ import soundfile as sf
 from datasets import Audio, load_dataset
 
 
-def prepare(limit: int, seed: int, cache: Path, language: str = "es_es") -> Path:
+def prepare(limit: int, seed: int, cache: Path, language: str = "es_419") -> Path:
     random.seed(seed)
     dataset = load_dataset("google/fleurs", language, split="validation", cache_dir=str(cache / "hf"))
     dataset = dataset.cast_column("audio", Audio(decode=False))

@@ -35,4 +35,6 @@ tmp/
 .evaluation-cache/
 docs/evaluation/results/asr/*.jsonl
 docs/evaluation/results/llm/predictions.jsonl
+docs/evaluation/results/llm*/predictions.jsonl
+docs/evaluation/figures/
 *.safetensors
