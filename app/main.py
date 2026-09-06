@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from starlette.concurrency import run_in_threadpool
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.analysis import (
     AnalysisAuthenticationFailed,
@@ -33,6 +33,7 @@ from app.repositories import (
     create_interaction,
     get_daily_summary,
     get_interaction,
+    get_interaction_by_capture_chunk_id,
     interactions_fingerprint,
     list_interactions,
     upsert_daily_summary,
@@ -138,13 +139,26 @@ def create_app(transcriber_factory=Transcriber, analyzer_factory=OpenAIAnalyzer,
         except (TypeError, ValueError) as exc:
             raise HTTPException(422, "recorded_at debe ser un ISO-8601 con zona horaria") from exc
 
-    def persist_interaction(recorded_at: datetime, transcription: dict, analysis: AnalysisResult):
+    def persist_interaction(
+        recorded_at: datetime,
+        transcription: dict,
+        analysis: AnalysisResult,
+        *,
+        capture_mode: str,
+        capture_session_id: uuid.UUID | None,
+        chunk_index: int | None,
+        capture_chunk_id: uuid.UUID | None,
+    ):
         try:
             with app.state.session_factory() as session:
                 try:
                     interaction = create_interaction(
                         session,
                         recorded_at=recorded_at,
+                        capture_mode=capture_mode,
+                        capture_session_id=capture_session_id,
+                        chunk_index=chunk_index,
+                        capture_chunk_id=capture_chunk_id,
                         transcription=transcription["text"],
                         language=transcription.get("language"),
                         transcription_model=transcription["model"],
@@ -157,6 +171,14 @@ def create_app(transcriber_factory=Transcriber, analyzer_factory=OpenAIAnalyzer,
                     session.refresh(interaction)
                     session.expunge(interaction)
                     return interaction
+                except IntegrityError:
+                    session.rollback()
+                    if capture_chunk_id is not None:
+                        duplicate = get_interaction_by_capture_chunk_id(session, capture_chunk_id)
+                        if duplicate is not None:
+                            session.expunge(duplicate)
+                            return duplicate
+                    raise
                 except SQLAlchemyError:
                     session.rollback()
                     raise
@@ -166,6 +188,10 @@ def create_app(transcriber_factory=Transcriber, analyzer_factory=OpenAIAnalyzer,
     def interaction_response(interaction) -> InteractionResponse:
         return InteractionResponse(
             id=interaction.id,
+            capture_mode=interaction.capture_mode,
+            capture_session_id=interaction.capture_session_id,
+            chunk_index=interaction.chunk_index,
+            capture_chunk_id=interaction.capture_chunk_id,
             recorded_at=to_utc(interaction.recorded_at),
             created_at=to_utc(interaction.created_at),
             transcription={
@@ -244,13 +270,59 @@ def create_app(transcriber_factory=Transcriber, analyzer_factory=OpenAIAnalyzer,
     async def process(
         file: Annotated[UploadFile, File()],
         recorded_at: Annotated[str | None, Form()] = None,
+        capture_mode: Annotated[str, Form()] = "manual",
+        capture_session_id: Annotated[str | None, Form()] = None,
+        chunk_index: Annotated[int | None, Form()] = None,
+        capture_chunk_id: Annotated[str | None, Form()] = None,
     ):
         received_at = datetime.now(timezone.utc)
         parsed_recorded_at = parse_recorded_at(recorded_at, received_at)
+        if capture_mode not in {"manual", "continuous", "smart"}:
+            raise HTTPException(422, "capture_mode no válido")
+        try:
+            parsed_session_id = uuid.UUID(capture_session_id) if capture_session_id else None
+            parsed_chunk_id = uuid.UUID(capture_chunk_id) if capture_chunk_id else None
+        except ValueError as exc:
+            raise HTTPException(422, "Los identificadores de captura deben ser UUID") from exc
+        if capture_mode == "continuous" and (parsed_session_id is None or chunk_index is None):
+            raise HTTPException(422, "Continuous requiere capture_session_id y chunk_index")
+        if chunk_index is not None and chunk_index < 0:
+            raise HTTPException(422, "chunk_index no puede ser negativo")
+        if parsed_chunk_id is not None:
+            with app.state.session_factory() as session:
+                existing = await run_in_threadpool(
+                    get_interaction_by_capture_chunk_id, session, parsed_chunk_id
+                )
+            if existing is not None:
+                await file.close()
+                return {
+                    "interaction_id": existing.id,
+                    "recorded_at": to_utc(existing.recorded_at),
+                    "created_at": to_utc(existing.created_at),
+                    "transcription": {
+                        "text": existing.transcription,
+                        "language": existing.language,
+                        "model": existing.transcription_model,
+                        "device": existing.transcription_device,
+                        "compute_type": existing.transcription_compute_type,
+                    },
+                    "analysis": AnalysisResult.model_validate(existing.analysis),
+                    "capture_mode": existing.capture_mode,
+                    "capture_session_id": existing.capture_session_id,
+                    "chunk_index": existing.chunk_index,
+                    "capture_chunk_id": existing.capture_chunk_id,
+                }
         transcription = await transcribe_upload(file)
         analysis = await run_in_threadpool(analyze_text, transcription["text"])
         interaction = await run_in_threadpool(
-            persist_interaction, parsed_recorded_at, transcription, analysis
+            persist_interaction,
+            parsed_recorded_at,
+            transcription,
+            analysis,
+            capture_mode=capture_mode,
+            capture_session_id=parsed_session_id,
+            chunk_index=chunk_index,
+            capture_chunk_id=parsed_chunk_id,
         )
         return {
             "interaction_id": interaction.id,
@@ -258,6 +330,10 @@ def create_app(transcriber_factory=Transcriber, analyzer_factory=OpenAIAnalyzer,
             "created_at": to_utc(interaction.created_at),
             "transcription": transcription,
             "analysis": analysis,
+            "capture_mode": interaction.capture_mode,
+            "capture_session_id": interaction.capture_session_id,
+            "chunk_index": interaction.chunk_index,
+            "capture_chunk_id": interaction.capture_chunk_id,
         }
 
     @app.get("/interactions/{interaction_id}", response_model=InteractionResponse)

@@ -22,6 +22,12 @@ def get_interaction(session: Session, interaction_id: uuid.UUID) -> Interaction 
     return session.get(Interaction, interaction_id)
 
 
+def get_interaction_by_capture_chunk_id(session: Session, capture_chunk_id: uuid.UUID) -> Interaction | None:
+    return session.scalar(
+        select(Interaction).where(Interaction.capture_chunk_id == capture_chunk_id)
+    )
+
+
 def list_interactions(
     session: Session,
     start: datetime | None = None,

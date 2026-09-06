@@ -25,7 +25,14 @@ fun normalizeBackendUrl(value: String): String {
     return "$trimmed/"
 }
 interface ProcessApi {
-    @Multipart @POST("process") suspend fun process(@Part file: MultipartBody.Part, @Part("recorded_at") recordedAt: okhttp3.RequestBody): ProcessResponse
+    @Multipart @POST("process") suspend fun process(
+        @Part file: MultipartBody.Part,
+        @Part("recorded_at") recordedAt: okhttp3.RequestBody,
+        @Part("capture_mode") captureMode: okhttp3.RequestBody,
+        @Part("capture_session_id") captureSessionId: okhttp3.RequestBody?,
+        @Part("chunk_index") chunkIndex: okhttp3.RequestBody?,
+        @Part("capture_chunk_id") captureChunkId: okhttp3.RequestBody?,
+    ): ProcessResponse
     @GET("health") suspend fun health(): HealthResponse
     @GET("interactions") suspend fun interactions(@Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): List<InteractionResponse>
     @GET("interactions/{id}") suspend fun interaction(@Path("id") id: String): InteractionResponse
@@ -48,7 +55,9 @@ class RetrofitBackendRepository(private val json: Json = Json { ignoreUnknownKey
         val api = api(backendUrl)
         val mediaType = if (audio.file.extension.equals("wav", ignoreCase = true)) "audio/wav" else "audio/mp4"
         val file = MultipartBody.Part.createFormData("file", audio.file.name, audio.file.asRequestBody(mediaType.toMediaType()))
-        return api.process(file, audio.recordedAt.toString().toRequestBody("text/plain".toMediaType()))
+        fun String.body() = toRequestBody("text/plain".toMediaType())
+        return api.process(file, audio.recordedAt.toString().body(), audio.captureMode.body(),
+            audio.captureSessionId?.body(), audio.chunkIndex?.toString()?.body(), audio.captureChunkId?.body())
     }
     override suspend fun health(backendUrl: String) = api(backendUrl).health()
     override suspend fun interactions(backendUrl: String, limit: Int, offset: Int) = api(backendUrl).interactions(limit, offset)

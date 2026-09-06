@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import java.util.UUID
 
 const val AUDIO_SAMPLE_RATE = 16_000
 const val AUDIO_FRAME_MILLIS = 20
@@ -58,6 +59,7 @@ class PcmFramer(private val frameSamples: Int = AUDIO_FRAME_SAMPLES) {
         }
         return frames
     }
+    fun flush(): ShortArray { val result = pending.toShortArray(); pending.clear(); return result }
 }
 
 /** Baseline VAD energético adaptativo; no es un modelo de aprendizaje automático. */
@@ -169,7 +171,14 @@ class VoiceEnrollmentRecorder(private val context: Context) {
     }
 }
 
-data class PendingSegment(val file: File, val recordedAt: Instant)
+data class PendingSegment(
+    val file: File,
+    val recordedAt: Instant,
+    val captureMode: String = "continuous",
+    val captureSessionId: String? = null,
+    val chunkIndex: Int? = null,
+    val captureChunkId: String = UUID.randomUUID().toString(),
+)
 class SegmentQueue(private val directory: File, private val maxSegments: Int = 20) {
     init { require(maxSegments > 0) { "La capacidad debe ser positiva" } }
     private val pending = ArrayDeque<PendingSegment>()
@@ -177,9 +186,13 @@ class SegmentQueue(private val directory: File, private val maxSegments: Int = 2
         directory.mkdirs()
         directory.listFiles { file -> file.name.startsWith("segment-") && file.extension == "wav" }
             ?.sortedBy { it.name }?.forEachIndexed { index, file ->
-                val recordedAt = file.name.removePrefix("segment-").substringBefore('-').toLongOrNull()?.let(Instant::ofEpochMilli)
+                val parts = file.name.removePrefix("segment-").removeSuffix(".wav").split('-')
+                val recordedAt = parts.firstOrNull()?.toLongOrNull()?.let(Instant::ofEpochMilli)
                     ?: Instant.ofEpochMilli(file.lastModified())
-                if (index < maxSegments) pending.addLast(PendingSegment(file, recordedAt)) else file.delete()
+                val sessionId = if (parts.size >= 12) parts.subList(1, 6).joinToString("-") else null
+                val chunkIndex = if (parts.size >= 12) parts[6].toIntOrNull() else null
+                val chunkId = if (parts.size >= 12) parts.subList(7, 12).joinToString("-") else UUID.randomUUID().toString()
+                if (index < maxSegments) pending.addLast(PendingSegment(file, recordedAt, "continuous", sessionId, chunkIndex, chunkId)) else file.delete()
             }
     }
     @Synchronized fun offer(segment: PendingSegment): Boolean { if (pending.size >= maxSegments) return false; pending.addLast(segment); return true }
@@ -210,6 +223,49 @@ class SegmentUploadCoordinator(
             segment = queue.poll()
         }
         true
+    }
+}
+
+/** Segmentación acústica heurística: busca una pausa después del mínimo y aplica un hard cap. */
+class ContinuousChunker(
+    private val minimumSeconds: Int = 25,
+    private val naturalStartSeconds: Int = 25,
+    private val pauseFrames: Int = 40,
+    private val hardCapSeconds: Int = 55,
+    private val vad: EnergyVad = EnergyVad(),
+) {
+    init {
+        require(minimumSeconds > 0 && naturalStartSeconds >= minimumSeconds && pauseFrames > 0)
+        require(hardCapSeconds > naturalStartSeconds && hardCapSeconds < 60)
+    }
+    private val framer = PcmFramer()
+    private val current = ArrayList<Short>()
+    private var silentFrames = 0
+    private val naturalStartSamples get() = naturalStartSeconds * AUDIO_SAMPLE_RATE
+    private val hardCapSamples get() = hardCapSeconds * AUDIO_SAMPLE_RATE
+
+    fun add(samples: ShortArray): List<ShortArray> {
+        val result = mutableListOf<ShortArray>()
+        for (frame in framer.add(samples)) {
+            current.addAll(frame.toList())
+            if (vad.isSpeech(frame)) silentFrames = 0 else silentFrames++
+            if (current.size >= hardCapSamples || (current.size >= naturalStartSamples && silentFrames >= pauseFrames)) {
+                result += cut()
+            }
+        }
+        return result
+    }
+
+    fun flush(): ShortArray? {
+        val remainder = framer.flush()
+        if (remainder.isNotEmpty()) current.addAll(remainder.toList())
+        return if (current.isEmpty()) null else cut()
+    }
+
+    private fun cut(): ShortArray {
+        val result = current.toShortArray()
+        current.clear(); silentFrames = 0
+        return result
     }
 }
 

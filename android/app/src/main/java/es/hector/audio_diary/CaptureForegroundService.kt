@@ -71,7 +71,7 @@ class CaptureForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(NOTIFICATION, notification)
         val backend = RetrofitBackendRepository()
         uploadCoordinator = SegmentUploadCoordinator(queue) { item ->
-            backend.process(CapturedAudio(item.file, item.recordedAt), backendUrl)
+            backend.process(CapturedAudio(item.file, item.recordedAt, item.captureMode, item.captureSessionId, item.chunkIndex, item.captureChunkId), backendUrl)
             increment("sent")
         }
         recordingJob = scope.launch { captureLoop(smart) }
@@ -83,25 +83,33 @@ class CaptureForegroundService : Service() {
         val source = AudioRecord(MediaRecorder.AudioSource.MIC, AUDIO_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum, AUDIO_FRAME_SAMPLES * 2 * 4))
         if (source.state != AudioRecord.STATE_INITIALIZED) { source.release(); stopSelf(); return }
         recorder = source; val audioSource: PcmAudioSource = AndroidAudioRecordSource(source); audioSource.start()
-        val maxSamples = AUDIO_SAMPLE_RATE * 30; val readBuffer = ShortArray(AUDIO_FRAME_SAMPLES * 4)
-        val accumulated = ArrayList<Short>(); var chunkStart = Instant.now(); val segmenter = if (smart) SmartSegmenter() else null; val framer = PcmFramer()
+        val readBuffer = ShortArray(AUDIO_FRAME_SAMPLES * 4)
+        val sessionId = if (smart) null else UUID.randomUUID().toString()
+        var chunkIndex = 0
+        val chunker = if (smart) null else ContinuousChunker()
+        var chunkStart = Instant.now()
+        val segmenter = if (smart) SmartSegmenter() else null; val framer = PcmFramer()
         try {
             while (recordingJob?.isActive != false) {
                 val count = audioSource.read(readBuffer); if (count <= 0) continue
                 val samples = readBuffer.copyOf(count)
                 if (segmenter != null) for (frame in framer.add(samples)) segmenter.accept(frame)?.let { handleSmartSegment(it) }
-                else { accumulated.addAll(samples.toList()); if (accumulated.size >= maxSamples) { saveSegment(accumulated.toShortArray(), chunkStart); accumulated.clear(); chunkStart = Instant.now() } }
+                else chunker?.add(samples)?.forEach { chunk ->
+                    saveSegment(chunk, chunkStart, "continuous", sessionId, chunkIndex++)
+                    chunkStart = Instant.now()
+                }
             }
         } finally {
             if (segmenter != null) segmenter.stop()?.let { handleSmartSegment(it) }
-            else if (accumulated.isNotEmpty()) saveSegment(accumulated.toShortArray(), chunkStart)
+            else chunker?.flush()?.let { saveSegment(it, chunkStart, "continuous", sessionId, chunkIndex++) }
             audioSource.stopAndRelease(); recorder = null
         }
     }
-    private fun saveSegment(samples: ShortArray, recordedAt: Instant) {
+    private fun saveSegment(samples: ShortArray, recordedAt: Instant, mode: String = "continuous", sessionId: String? = null, chunkIndex: Int? = null) {
         if (samples.isEmpty()) return
-        val directory = File(cacheDir, "pending-segments"); directory.mkdirs(); val file = File(directory, "segment-${recordedAt.toEpochMilli()}-${UUID.randomUUID()}.wav")
-        WavWriter.write(file, samples); if (queue.offer(PendingSegment(file, recordedAt))) { increment("enqueued"); wakeups.trySend(Unit) } else { increment("discarded"); file.delete() }
+        val directory = File(cacheDir, "pending-segments"); directory.mkdirs(); val chunkId = UUID.randomUUID().toString()
+        val file = File(directory, "segment-${recordedAt.toEpochMilli()}-${sessionId ?: "legacy"}-${chunkIndex ?: "x"}-$chunkId.wav")
+        WavWriter.write(file, samples); if (queue.offer(PendingSegment(file, recordedAt, mode, sessionId, chunkIndex, chunkId))) { increment("enqueued"); wakeups.trySend(Unit) } else { increment("discarded"); file.delete() }
     }
     private fun handleSmartSegment(segment: SmartSegment) {
         increment("detected")
@@ -109,7 +117,7 @@ class CaptureForegroundService : Service() {
         val measurement = smartInstrumentation.evaluate(segment.samples, smartVerifier)
         if (measurement.accepted) {
             increment("accepted_session")
-            saveSegment(segment.samples, segment.recordedAt)
+            saveSegment(segment.samples, segment.recordedAt, "smart")
         } else {
             increment("discarded")
             increment("discarded_session")

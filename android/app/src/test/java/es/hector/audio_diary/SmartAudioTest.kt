@@ -37,6 +37,30 @@ class SmartAudioTest {
         val framer = PcmFramer(4); assertTrue(framer.add(shortArrayOf(1, 2)).isEmpty()); val frames = framer.add(shortArrayOf(3, 4, 5, 6))
         assertEquals(1, frames.size); assertArrayEquals(shortArrayOf(1, 2, 3, 4), frames.single()); assertTrue(framer.add(shortArrayOf(7)).isEmpty())
     }
+    @Test fun continuous_pause_before_minimum_does_not_cut() {
+        val chunker = ContinuousChunker(minimumSeconds = 1, naturalStartSeconds = 1, pauseFrames = 2, hardCapSeconds = 2, vad = EnergyVad(calibrationFrames = 0))
+        val silence = ShortArray(AUDIO_FRAME_SAMPLES)
+        repeat(20) { assertTrue(chunker.add(silence).isEmpty()) }
+        assertNotNull(chunker.flush())
+    }
+    @Test fun continuous_pause_after_minimum_cuts_without_losing_samples() {
+        val chunker = ContinuousChunker(minimumSeconds = 1, naturalStartSeconds = 1, pauseFrames = 2, hardCapSeconds = 2, vad = EnergyVad(calibrationFrames = 0))
+        val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }; val silence = ShortArray(AUDIO_FRAME_SAMPLES)
+        repeat(50) { chunker.add(voice) }
+        val cut = chunker.add(silence).single()
+        assertEquals(AUDIO_FRAME_SAMPLES * 52, cut.size)
+        assertEquals(0, chunker.flush()?.size ?: 0)
+    }
+    @Test fun continuous_hard_cap_bounds_uninterrupted_audio() {
+        val chunker = ContinuousChunker(minimumSeconds = 1, naturalStartSeconds = 1, pauseFrames = 2, hardCapSeconds = 2, vad = EnergyVad(calibrationFrames = 0))
+        val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }
+        val chunks = mutableListOf<ShortArray>()
+        repeat(125) { chunks += chunker.add(voice) }
+        chunker.flush()?.let { chunks += it }
+        assertEquals(2, chunks.size)
+        assertTrue(chunks.all { it.size <= 2 * AUDIO_SAMPLE_RATE })
+        assertEquals(125 * AUDIO_FRAME_SAMPLES, chunks.sumOf { it.size })
+    }
     @Test fun speaker_template_scores_same_features_and_can_be_removed() {
         val verifier = AcousticSpeakerSimilarity(); val sample = ShortArray(1_000) { if (it % 2 == 0) 1000 else -1000 }
         verifier.enroll(sample); assertTrue(verifier.hasEnrollment()); assertTrue(verifier.score(sample) > .99f); verifier.clear(); assertFalse(verifier.hasEnrollment())
