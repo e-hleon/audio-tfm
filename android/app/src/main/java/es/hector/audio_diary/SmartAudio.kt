@@ -242,6 +242,10 @@ class SmartSegmenter(
                 }
             }
         }
+        if (state == SmartState.ENDING && silentFrames >= endingSilenceFrames) {
+            if (voicedSamples >= minimumSpeechFrames * AUDIO_FRAME_SAMPLES) return finish()
+            resetCandidate()
+        }
         if (current.size >= maximumFrames * AUDIO_FRAME_SAMPLES) {
             if (state == SmartState.SPEECH || state == SmartState.ENDING) return finish()
             resetCandidate()
