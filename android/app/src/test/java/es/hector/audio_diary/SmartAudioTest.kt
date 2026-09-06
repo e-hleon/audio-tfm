@@ -8,6 +8,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SmartAudioTest {
+    @Test fun invalid_fixed_buffer_parameters_are_rejected() {
+        assertFailsWith<IllegalArgumentException> { PcmRingBuffer(0) }
+        assertFailsWith<IllegalArgumentException> { PcmFramer(0) }
+        assertFailsWith<IllegalArgumentException> { SegmentQueue(createTempDir("queue"), 0) }
+    }
     @Test fun ring_buffer_wraps_and_keeps_recent_order() {
         val ring = PcmRingBuffer(4); ring.add(shortArrayOf(1, 2, 3)); ring.add(shortArrayOf(4, 5))
         assertArrayEquals(shortArrayOf(2, 3, 4, 5), ring.snapshot())
@@ -20,7 +25,7 @@ class SmartAudioTest {
         } finally { file.delete() }
     }
     @Test fun energy_vad_rejects_silence_and_accepts_signal() {
-        val vad = EnergyVad(); assertFalse(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES))); assertTrue(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }))
+        val vad = EnergyVad(); assertTrue(vad.energyDb(shortArrayOf()).isFinite()); assertFalse(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES))); assertTrue(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }))
     }
     @Test fun framer_turns_partial_reads_into_fixed_frames() {
         val framer = PcmFramer(4); assertTrue(framer.add(shortArrayOf(1, 2)).isEmpty()); val frames = framer.add(shortArrayOf(3, 4, 5, 6))
@@ -29,6 +34,11 @@ class SmartAudioTest {
     @Test fun speaker_template_scores_same_features_and_can_be_removed() {
         val verifier = AcousticSpeakerSimilarity(); val sample = ShortArray(1_000) { if (it % 2 == 0) 1000 else -1000 }
         verifier.enroll(sample); assertTrue(verifier.hasEnrollment()); assertTrue(verifier.score(sample) > .99f); verifier.clear(); assertFalse(verifier.hasEnrollment())
+    }
+    @Test fun speaker_rejects_invalid_templates_and_zero_vectors() {
+        val verifier = AcousticSpeakerSimilarity(); verifier.load("not-a-number"); assertFalse(verifier.hasEnrollment())
+        verifier.load("NaN,1,2"); assertFalse(verifier.hasEnrollment())
+        verifier.enroll(shortArrayOf(0, 0, 0)); assertEquals(0f, verifier.score(shortArrayOf(0, 0, 0)), 0f)
     }
     @Test fun queue_rejects_beyond_capacity_and_requeues_failures() {
         val queue = SegmentQueue(createTempDir("queue"), 1); val first = PendingSegment(File.createTempFile("one", ".wav"), Instant.EPOCH); val second = PendingSegment(File.createTempFile("two", ".wav"), Instant.EPOCH)

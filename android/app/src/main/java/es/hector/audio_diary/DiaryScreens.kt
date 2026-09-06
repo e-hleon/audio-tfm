@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -59,15 +60,19 @@ enum class CaptureMode { MANUAL, CONTINUOUS, SMART }
     val verifier = remember { AcousticSpeakerSimilarity().also { it.load(preferences.getString("speaker_template", "") ?: "") } }; var enrolled by remember { mutableStateOf(verifier.hasEnrollment()) }
     val permissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     var hasPermission by remember { mutableStateOf(permissionGranted) }; val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { hasPermission = it }
+    val notificationsGranted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    var hasNotifications by remember { mutableStateOf(notificationsGranted) }
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { hasNotifications = it }
     val state by viewModel.state.collectAsStateWithLifecycle(); Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Modo de captura", style = MaterialTheme.typography.titleLarge); Text("Manual: guarda una nota de voz hasta 59 segundos."); Text("Continuo: conserva toda la sesión y la divide en chunks."); Text("Inteligente (experimental): VAD y similitud local pueden omitir o aceptar audio incorrectamente.")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { CaptureMode.values().forEach { item -> if (mode == item) Button({ mode = item }) { Text(item.name) } else OutlinedButton({ mode = item }) { Text(item.name) } } }
         if (!hasPermission) Button({ ask.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Autorizar micrófono") }
+        if (mode != CaptureMode.MANUAL && !hasNotifications && Build.VERSION.SDK_INT >= 33) { Text("Android necesita permiso de notificaciones para mostrar que la captura continua está activa.", color = MaterialTheme.colorScheme.error); Button({ askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text("Autorizar notificaciones") } }
         when (mode) {
             CaptureMode.MANUAL -> ManualCaptureContent(viewModel, url, state, context)
             CaptureMode.CONTINUOUS, CaptureMode.SMART -> { Text(if (mode == CaptureMode.CONTINUOUS) "El modo continuo conserva todo el audio de la sesión hasta procesarlo." else "Experimental: no es reconocimiento infalible.")
                 if (mode == CaptureMode.SMART) { Text(if (enrolled) "Plantilla local registrada" else "Sin enrollment: el modo inteligente no puede verificar al usuario"); if (!enrolling) Button({ if (hasPermission) { enrolling = true; scope.launch { runCatching { verifier.enrollRepresentation(VoiceEnrollmentRecorder(context).record()); preferences.edit().putString("speaker_template", verifier.serialize()).apply(); enrolled = true }; enrolling = false } } }) { Text(if (enrolled) "Reemplazar mi voz" else "Registrar mi voz (4 s)") } else Text("Registrando voz localmente…"); if (enrolled) OutlinedButton({ verifier.clear(); preferences.edit().remove("speaker_template").apply(); enrolled = false }) { Text("Eliminar enrollment") } }
-                if (!active) Button({ if (hasPermission) { ContextCompat.startForegroundService(context, Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START).putExtra(CaptureForegroundService.EXTRA_SMART, mode == CaptureMode.SMART).putExtra(CaptureForegroundService.EXTRA_BACKEND, url)); active = true } }) { Text("Iniciar ${mode.name.lowercase()}") }
+                if (!active) Button(enabled = hasPermission && hasNotifications, onClick = { ContextCompat.startForegroundService(context, Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START).putExtra(CaptureForegroundService.EXTRA_SMART, mode == CaptureMode.SMART).putExtra(CaptureForegroundService.EXTRA_BACKEND, url)); active = true }) { Text("Iniciar ${mode.name.lowercase()}") }
                 else { Text("Grabando ${mode.name.lowercase()} · micrófono activo", color = MaterialTheme.colorScheme.error); Text(stats); Button({ context.startService(Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_STOP)); active = false }) { Text("Detener") }; Text("Los chunks se suben secuencialmente; un fallo queda pendiente para reintento posterior.") }
             }
         }

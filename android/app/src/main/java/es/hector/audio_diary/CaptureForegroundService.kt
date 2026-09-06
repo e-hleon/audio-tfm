@@ -14,6 +14,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.time.Instant
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,6 +22,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 
 /** Servicio visible: captura solo después de una acción explícita del usuario. */
 class CaptureForegroundService : Service() {
@@ -45,7 +47,7 @@ class CaptureForegroundService : Service() {
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) stopCapture()
-        else if (recordingJob == null) startCapture(intent?.getBooleanExtra(EXTRA_SMART, false) == true, intent?.getStringExtra(EXTRA_BACKEND).orEmpty())
+        else if (recordingJob?.isActive != true) startCapture(intent?.getBooleanExtra(EXTRA_SMART, false) == true, intent?.getStringExtra(EXTRA_BACKEND).orEmpty())
         return START_NOT_STICKY
     }
     private fun startCapture(smart: Boolean, backendUrl: String) {
@@ -68,6 +70,7 @@ class CaptureForegroundService : Service() {
         val minimum = AudioRecord.getMinBufferSize(AUDIO_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minimum <= 0) { stopSelf(); return }
         val source = AudioRecord(MediaRecorder.AudioSource.MIC, AUDIO_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum, AUDIO_FRAME_SAMPLES * 2 * 4))
+        if (source.state != AudioRecord.STATE_INITIALIZED) { source.release(); stopSelf(); return }
         recorder = source; val audioSource: PcmAudioSource = AndroidAudioRecordSource(source); audioSource.start()
         val maxSamples = AUDIO_SAMPLE_RATE * 30; val readBuffer = ShortArray(AUDIO_FRAME_SAMPLES * 4)
         val accumulated = ArrayList<Short>(); var chunkStart = Instant.now(); val segmenter = if (smart) SmartSegmenter() else null; val framer = PcmFramer()
@@ -85,11 +88,13 @@ class CaptureForegroundService : Service() {
         }
     }
     private fun saveSegment(samples: ShortArray, recordedAt: Instant) {
-        val directory = File(cacheDir, "pending-segments"); directory.mkdirs(); val file = File.createTempFile("segment-", ".wav", directory)
+        if (samples.isEmpty()) return
+        val directory = File(cacheDir, "pending-segments"); directory.mkdirs(); val file = File(directory, "segment-${recordedAt.toEpochMilli()}-${UUID.randomUUID()}.wav")
         WavWriter.write(file, samples); if (queue.offer(PendingSegment(file, recordedAt))) { increment("enqueued"); wakeups.trySend(Unit) } else { increment("discarded"); file.delete() }
     }
     private suspend fun uploadLoop(backendUrl: String) {
-        while (recordingJob?.isActive != false || queue.size > 0) {
+        wakeups.trySend(Unit)
+        while (kotlinx.coroutines.currentCoroutineContext().isActive) {
             wakeups.receive(); var item = queue.poll()
             while (item != null) {
                 try { RetrofitBackendRepository().process(CapturedAudio(item.file, item.recordedAt), backendUrl); increment("sent"); item.file.delete() }
@@ -99,7 +104,7 @@ class CaptureForegroundService : Service() {
         }
     }
     private fun increment(key: String) { val prefs = getSharedPreferences("audio_diary", MODE_PRIVATE); prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply() }
-    private fun stopCapture() { recordingJob?.cancel(); recordingJob = null; recorder?.let { runCatching { it.stop(); it.release() }; recorder = null }; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+    private fun stopCapture() { recordingJob?.cancel(); recorder?.let { runCatching { it.stop(); it.release() }; recorder = null }; wakeups.trySend(Unit); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
     override fun onDestroy() { recordingJob?.cancel(); recorder?.let { runCatching { it.stop(); it.release() } }; scope.cancel(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
 }

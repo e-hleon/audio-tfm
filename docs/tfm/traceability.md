@@ -1,13 +1,12 @@
 # Trazabilidad
 
-| Requisito | Implementación | Tests/evidencia | Estado |
-|---|---|---|---|
-| Captura manual | `MediaRecorderAudioRecorder`, `CaptureViewModel` | tests JVM, PR #5 | existente |
-| Histórico | `ProcessApi.interactions`, `HistoryScreen` | `BackendTest` | implementado, UI física pendiente |
-| Vista diaria/resumen | `day`, `generateSummary`, `DayScreen` | backend existente, `BackendTest` | implementado |
-| Continuo explícito | `CaptureForegroundService`, `AudioRecord` | tests de lógica | implementado, hardware pendiente |
-| Chunks y WAV | `WavWriter`, `SegmentQueue` | `SmartAudioTest` | implementado |
-| Smart/VAD | `SmartSegmenter`, `EnergyVad` | PCM sintético | experimental |
-| Enrollment/similitud | `VoiceEnrollmentRecorder`, `AcousticSpeakerSimilarity` | tests matemáticos | baseline implementado |
-| Privacidad | permisos, servicio visible, plantilla privada | revisión documental | implementado, revisión en dispositivo pendiente |
-| Evaluación ASR/LLM | PR #6 separado | CI y harness | externa/pendiente por entorno |
+| Requisito/objetivo | Implementación | Archivo | Test | Validación | Estado | Riesgo pendiente |
+|---|---|---|---|---|---|---|
+| Captura manual | MediaRecorder + ViewModel | `android/.../AudioRecorder.kt`, `CaptureViewModel.kt` | `CaptureViewModelTest` | `physical-device-plan` | automatizado JVM | dispositivo real |
+| ASR local | faster-whisper CUDA | `app/transcription.py` | `tests/test_transcription.py` | smoke/benchmark | implementado | GPU/recurso |
+| Análisis estructurado | Analyzer + schema | `app/analysis.py` | `tests/test_analysis.py` | LLM benchmark | implementado | proveedor externo |
+| Persistencia | SQLAlchemy/Alembic | `app/models.py`, `repositories.py` | `test_persistence.py` | migración + API | implementado | concurrencia escala |
+| Histórico/día | rutas y ViewModels | `app/main.py`, `DiaryViewModels.kt` | backend + JVM | dispositivo | implementado | timezone UI |
+| Continuous | FGS, PCM16, chunks, cola | `CaptureForegroundService.kt` | `SmartAudioTest` parcial | dispositivo | implementado, físico pendiente | interrupciones Android |
+| Smart experimental | VAD, ring, similarity | `SmartAudio.kt` | `SmartAudioTest` | corpus sintético/físico | baseline | no biometría |
+| Privacidad | cache privada, no audio al LLM | arquitectura + manifest | static check | revisión | implementado | terceros/retención |

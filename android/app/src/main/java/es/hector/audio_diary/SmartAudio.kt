@@ -28,6 +28,7 @@ class AndroidAudioRecordSource(private val record: AudioRecord) : PcmAudioSource
 
 /** Ring buffer de tamaño fijo: conserva únicamente el audio inmediatamente anterior. */
 class PcmRingBuffer(private val capacity: Int) {
+    init { require(capacity > 0) { "La capacidad debe ser positiva" } }
     private val values = ShortArray(capacity)
     private var next = 0
     private var count = 0
@@ -37,6 +38,7 @@ class PcmRingBuffer(private val capacity: Int) {
 }
 
 class PcmFramer(private val frameSamples: Int = AUDIO_FRAME_SAMPLES) {
+    init { require(frameSamples > 0) { "El tamaño de frame debe ser positivo" } }
     private val pending = ArrayList<Short>()
     fun add(samples: ShortArray): List<ShortArray> {
         pending.ensureCapacity(pending.size + samples.size)
@@ -58,7 +60,9 @@ class EnergyVad(
 ) {
     private var noiseDb = initialNoiseDb
     fun energyDb(frame: ShortArray): Double {
-        val rms = sqrt(frame.map { it.toDouble() * it }.average()) / Short.MAX_VALUE
+        if (frame.isEmpty()) return -160.0
+        val sum = frame.fold(0.0) { total, sample -> total + sample.toDouble() * sample.toDouble() }
+        val rms = sqrt(sum / frame.size) / Short.MAX_VALUE.toDouble()
         return 20.0 * log10(maxOf(rms, 1e-8))
     }
     fun isSpeech(frame: ShortArray, previousSpeech: Boolean = false): Boolean {
@@ -79,26 +83,32 @@ class AcousticSpeakerSimilarity(private var template: FloatArray? = null) {
         return floatArrayOf(mean.toFloat(), energy, crossings)
     }
     fun enroll(samples: ShortArray) { template = representation(samples) }
-    fun enrollRepresentation(values: FloatArray) { require(values.size == 3); template = values }
+    fun enrollRepresentation(values: FloatArray) { require(values.size == 3 && values.all(Float::isFinite)); template = values.copyOf() }
     fun hasEnrollment() = template != null
     fun score(samples: ShortArray): Float {
         val expected = template ?: return 0f
         val actual = representation(samples)
         val dot = expected.zip(actual).sumOf { (a, b) -> (a * b).toDouble() }
         val a = sqrt(expected.sumOf { (it * it).toDouble() }); val b = sqrt(actual.sumOf { (it * it).toDouble() })
-        return if (a == 0.0 || b == 0.0) 0f else (dot / (a * b)).toFloat()
+        if (!expected.all(Float::isFinite) || !actual.all(Float::isFinite) || a == 0.0 || b == 0.0) return 0f
+        return (dot / (a * b)).toFloat().coerceIn(-1f, 1f).takeIf { it.isFinite() } ?: 0f
     }
     fun serialize(): String = template?.joinToString(",") ?: ""
-    fun load(serialized: String) { template = serialized.split(",").filter { it.isNotBlank() }.map { it.toFloat() }.toFloatArray().takeIf { it.size == 3 } }
+    fun load(serialized: String) {
+        template = runCatching { serialized.split(",").filter { it.isNotBlank() }.map { it.toFloat() }.toFloatArray() }
+            .getOrNull()?.takeIf { it.size == 3 && it.all(Float::isFinite) }
+    }
     fun clear() { template = null }
 }
 
 /** Enrollment explícito: solo conserva tres números acústicos en preferencias privadas. */
 class VoiceEnrollmentRecorder(private val context: Context) {
     suspend fun record(seconds: Int = 4): FloatArray = withContext(Dispatchers.IO) {
+        require(seconds > 0) { "La duración de enrollment debe ser positiva" }
         val minimum = AudioRecord.getMinBufferSize(AUDIO_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         require(minimum > 0) { "El dispositivo no admite PCM mono a 16 kHz" }
         val source = AudioRecord(MediaRecorder.AudioSource.MIC, AUDIO_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum, AUDIO_FRAME_SAMPLES * 4))
+        check(source.state == AudioRecord.STATE_INITIALIZED) { source.release(); "No se pudo inicializar AudioRecord" }
         val samples = ShortArray(AUDIO_SAMPLE_RATE * seconds); var offset = 0; val read = ShortArray(AUDIO_FRAME_SAMPLES * 4)
         try { source.startRecording(); while (offset < samples.size) { val count = source.read(read, 0, minOf(read.size, samples.size - offset)); if (count > 0) { read.copyInto(samples, offset, 0, count); offset += count } } }
         finally { runCatching { source.stop() }; source.release() }
@@ -108,11 +118,16 @@ class VoiceEnrollmentRecorder(private val context: Context) {
 
 data class PendingSegment(val file: File, val recordedAt: Instant)
 class SegmentQueue(private val directory: File, private val maxSegments: Int = 20) {
+    init { require(maxSegments > 0) { "La capacidad debe ser positiva" } }
     private val pending = ArrayDeque<PendingSegment>()
     init {
         directory.mkdirs()
         directory.listFiles { file -> file.name.startsWith("segment-") && file.extension == "wav" }
-            ?.sortedBy { it.name }?.forEachIndexed { index, file -> if (index < maxSegments) pending.addLast(PendingSegment(file, Instant.now())) else file.delete() }
+            ?.sortedBy { it.name }?.forEachIndexed { index, file ->
+                val recordedAt = file.name.removePrefix("segment-").substringBefore('-').toLongOrNull()?.let(Instant::ofEpochMilli)
+                    ?: Instant.ofEpochMilli(file.lastModified())
+                if (index < maxSegments) pending.addLast(PendingSegment(file, recordedAt)) else file.delete()
+            }
     }
     @Synchronized fun offer(segment: PendingSegment): Boolean { if (pending.size >= maxSegments) return false; pending.addLast(segment); return true }
     @Synchronized fun poll(): PendingSegment? = pending.removeFirstOrNull()
@@ -123,6 +138,8 @@ class SegmentQueue(private val directory: File, private val maxSegments: Int = 2
 
 object WavWriter {
     fun write(file: File, samples: ShortArray, sampleRate: Int = AUDIO_SAMPLE_RATE) {
+        require(sampleRate > 0) { "La frecuencia debe ser positiva" }
+        require(samples.size <= (Int.MAX_VALUE - 36) / 2) { "El WAV es demasiado grande" }
         FileOutputStream(file).use { out ->
             val dataSize = samples.size * 2
             fun ascii(value: String) = value.toByteArray(Charsets.US_ASCII).also { out.write(it) }
@@ -141,6 +158,7 @@ class SmartSegmenter(
     private val minimumSpeechFrames: Int = 3, private val endingSilenceFrames: Int = 40,
     private val maximumFrames: Int = 2_250, private val clock: () -> Instant = { Instant.now() }
 ) {
+    init { require(preRollFrames > 0 && minimumSpeechFrames > 0 && endingSilenceFrames > 0 && maximumFrames > 0) }
     private val preRoll = PcmRingBuffer(preRollFrames * AUDIO_FRAME_SAMPLES)
     private val current = ArrayList<Short>(); private var speechFrames = 0; private var silentFrames = 0; private var segmentStart: Instant? = null
     var state = SmartState.SILENCE; private set
