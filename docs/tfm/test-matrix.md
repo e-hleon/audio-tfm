@@ -8,7 +8,7 @@
 | DailySummary | sí | timezone/fingerprint | OpenAI real no repetido | no | MEASURED parcial |
 | Manual Android | JVM | CI Android | no | no | CI MEASURED |
 | Continuous | JVM lógico | no | no | no | NOT MEASURED |
-| Smart | JVM lógico | no | no | no | MEASURED sintético |
-| Speaker baseline | JVM numérico | no | no | no | MEASURED limitado |
+| Smart | JVM lógico | no | no | Pixel 8: silencio y frases consentidas | MEASURED físico limitado; VAD mejorado, sin precisión general |
+| Speaker baseline | JVM numérico | no | no | Pixel 8: voz propia y otra voz | MEASURED físico mínimo: no discriminativo; FAR/FRR NOT MEASURED |
 | Batería | no | no | no | no | NOT MEASURED |
 | Emulator `androidTest` | compilación workflow separado | no | dispatch bloqueado | no | BLOCKED |

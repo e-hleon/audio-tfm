@@ -37,6 +37,6 @@
 35. **¿Por qué notificación?** Android exige visibilidad adecuada para una captura de micrófono en foreground service.
 36. **¿Qué mide la evaluación ASR?** FLEURS leído, no conversación espontánea; WER/CER, latencia, RTF y fallos.
 37. **¿Una llamada por fixture basta?** Mide esa ejecución, no la varianza del proveedor.
-38. **¿Qué limitación principal queda?** Falta validación física y medición de batería con consentimiento.
+38. **¿Qué limitación principal queda?** La validación física mostró que el VAD mejorado suprime el silencio probado, pero la similitud acústica no distingue voz propia de otra voz: todos los scores observados fueron 1.0000. No se pueden afirmar FAR/FRR formales; también queda medir batería.
 39. **¿Qué cambiarías en producción?** Auth, límites de recepción más tempranos, jobs persistentes e idempotencia.
 40. **¿Cuál es la contribución?** Un flujo local-first pequeño, trazable y con límites explícitos, no un modelo nuevo.

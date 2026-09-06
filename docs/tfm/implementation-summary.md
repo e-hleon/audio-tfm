@@ -17,5 +17,6 @@ estado `missing/ready/stale` lo decide el backend. ViewModels y StateFlow modela
 estados de carga, vacío, error y éxito.
 
 La calidad automática se cubre con tests backend, JVM Android y Compose compilable.
-La evaluación ASR/LLM está aislada en PR #6; esta rama añade la lógica y método de
-evaluación del selector, pero no inventa mediciones de hardware ausente.
+La evaluación ASR/LLM está aislada en PR #6. La validación física SMART en Pixel 8
+confirmó el efecto de la calibración VAD en silencio, pero mostró que la similitud
+acústica no discrimina hablantes; no se presentan FAR/FRR formales.

@@ -12,7 +12,7 @@
 | MediaRecorder/AudioRecord/PCM/WAV | AAC simple para manual; PCM permite frames y VAD | WAV ocupa más; el backend decodifica ambos |
 | ForegroundService | Notificación persistente para captura explícita fuera de Activity | sin servicio se detiene al ocultar UI |
 | VAD | Clasifica frames como voz/no voz por energía adaptativa | modelo VAD; baseline sensible a ruido |
-| speaker similarity/coseno | Compara plantilla acústica local con segmento | no es biometría ni identifica terceros |
+| speaker similarity/coseno | Compara plantilla acústica local con segmento; en Pixel 8 saturó en 1.0000 para dos voces | baseline fallido/no discriminativo; no es biometría ni identifica terceros |
 | WER/CER/precision/recall/F1/RTF | Métricas de ASR, extracción y velocidad | dependen de corpus y reglas de matching |
 | fingerprint/stale | Huella de entradas del día detecta resumen desactualizado | ventana de concurrencia documentada |
 

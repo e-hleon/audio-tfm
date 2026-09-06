@@ -1,14 +1,14 @@
 # Borrador técnico de memoria del TFM
 
-> Estado: borrador basado en el repositorio. Las ejecuciones físicas Android, la batería y los benchmarks reales que no tengan artefactos medidos se marcan como pendientes.
+> Estado: borrador basado en el repositorio. La validación física SMART en Pixel 8 ya está documentada; la batería, la precisión general del VAD y las métricas formales de speaker siguen sin medirse.
 
 ## 1. Resumen
 
-Este trabajo presenta una plataforma local-first para construir un diario personal a partir de voz. Un cliente Android captura audio manual, continuo o selectivo; un backend FastAPI recibe el audio, ejecuta transcripción local con faster-whisper y convierte el texto en información estructurada mediante un proveedor LLM desacoplado. PostgreSQL conserva las interacciones y los resúmenes diarios. El diseño limita el tamaño y duración del audio, mantiene los ficheros temporales en almacenamiento privado y evita enviar audio al proveedor externo. La evaluación automatizada cubre contratos, persistencia y extracción estructurada; el ASR FLEURS y la validación física Android siguen pendientes.
+Este trabajo presenta una plataforma local-first para construir un diario personal a partir de voz. Un cliente Android captura audio manual, continuo o selectivo; un backend FastAPI recibe el audio, ejecuta transcripción local con faster-whisper y convierte el texto en información estructurada mediante un proveedor LLM desacoplado. PostgreSQL conserva las interacciones y los resúmenes diarios. El diseño limita el tamaño y duración del audio, mantiene los ficheros temporales en almacenamiento privado y evita enviar audio al proveedor externo. La evaluación automatizada cubre contratos, persistencia y extracción estructurada; el ASR FLEURS sigue pendiente y la validación física SMART queda limitada a los resultados documentados en Pixel 8.
 
 ## 2. Abstract
 
-This thesis develops a local-first platform for building a personal diary from voice recordings. An Android client supports manual, continuous and experimental selective capture. A FastAPI backend receives audio, performs local transcription with faster-whisper, and extracts structured information through a replaceable LLM provider. PostgreSQL stores interactions and daily summaries. The design limits audio size and duration, keeps temporary files private, and sends derived text rather than audio to the external provider. Automated tests cover contracts, persistence and evaluation infrastructure. Physical-device validation and unmeasured experimental results are explicitly left as pending work.
+This thesis develops a local-first platform for building a personal diary from voice recordings. An Android client supports manual, continuous and experimental selective capture. A FastAPI backend receives audio, performs local transcription with faster-whisper, and extracts structured information through a replaceable LLM provider. PostgreSQL stores interactions and daily summaries. The design limits audio size and duration, keeps temporary files private, and sends derived text rather than audio to the external provider. Automated tests cover contracts, persistence and evaluation infrastructure. A limited Pixel 8 validation shows that the hardened energy VAD suppresses the tested silence false positives, while the acoustic speaker baseline is non-discriminative in the observed conditions.
 
 ## 3. Palabras clave
 
@@ -93,7 +93,7 @@ sequenceDiagram
 
 ## 18. Captura inteligente
 
-El modo smart es experimental. Un framer convierte lecturas parciales en frames de 20 ms; un ring buffer añade pre-roll; un VAD energético adaptativo transita por SILENCE, POSSIBLE_SPEECH, SPEECH y ENDING. La similitud acústica usa una representación simple de media, energía y cruces por cero. No es biometría robusta ni identificación general. El audio descartado no se guarda como segmento pendiente.
+El modo smart es experimental. Un framer convierte lecturas parciales en frames de 20 ms; una calibración inicial de 2 s estima el ruido; un ring buffer añade pre-roll; y un VAD energético adaptativo exige 10 frames consecutivos (200 ms) y cierra tras 800 ms de silencio. La similitud acústica usa una representación simple de media, energía y cruces por cero. La prueba física mostró 0 detecciones en silencio, pero también scores 1.0000 para voz propia y otra voz. Por tanto, este componente es un baseline experimental fallido/no discriminativo, no biometría ni speaker verification. El audio descartado no se guarda como segmento pendiente.
 
 ## 19. Privacidad y minimización
 
@@ -119,11 +119,11 @@ Los tests JVM cubren ViewModel, JSON/Retrofit, cola, WAV, VAD, ring buffer y sim
 
 ## 21. Evaluación experimental
 
-ASR: FLEURS español, validation, seed fija, modelos base/small y resume. LLM: 36 casos sintéticos, una llamada por caso, matching 1:1 por evidencia y métricas PRF. Smart: evaluación funcional sintética de estados; no se presenta como precisión de voz. Speaker: el harness debe medir FAR/FRR con audios consentidos. Batería: baseline idle, continuous y smart durante 15–30 minutos.
+ASR: FLEURS español, validation, seed fija, modelos base/small y resume. LLM: 36 casos sintéticos, una llamada por caso, matching 1:1 por evidencia y métricas PRF. Smart: evaluación funcional sintética y validación física limitada en Pixel 8, sin presentarla como precisión general de voz. Speaker: la prueba física mínima fue no discriminativa; FAR/FRR formales siguen sin medirse. Batería: baseline idle, continuous y smart durante 15–30 minutos.
 
 ## 22. Resultados
 
-ASR: [RESULTADO REAL PENDIENTE: corpus WER/CER, latencia, RTF, fallos y carga para base/small]. Tras reforzar de forma general la instrucción de evidencia literal, el desarrollo LLM obtuvo 36/36 respuestas válidas, micro precision=0,763, recall=0,935 y F1=0,841; el holdout sintético independiente obtuvo 15/15 válidas y micro F1=1,000. Son resultados de corpus pequeños y no prueban exactitud general. Smart, speaker y batería: [RESULTADO REAL PENDIENTE: validación física o corpus consentido].
+ASR: [RESULTADO REAL PENDIENTE: corpus WER/CER, latencia, RTF, fallos y carga para base/small]. Tras reforzar de forma general la instrucción de evidencia literal, el desarrollo LLM obtuvo 36/36 respuestas válidas, micro precision=0,763, recall=0,935 y F1=0,841; el holdout sintético independiente obtuvo 15/15 válidas y micro F1=1,000. Son resultados de corpus pequeños y no prueban exactitud general. Smart físico: en Pixel 8, silencio produjo 0 detecciones y 0 POST; tres frases del usuario produjeron 3 detecciones y 3 envíos. Una frase se segmentó en dos por una pausa larga y Logcat registró cuatro segmentos con score 1.0000. Otra voz produjo cuatro segmentos observados, todos con score 1.0000 y 0 descartes. Speaker: el baseline no discriminó hablantes en esta prueba; no se calculan FAR/FRR formales.
 
 ## 23. Discusión
 
@@ -131,15 +131,15 @@ La separación ASR local/LLM externo permite reducir la exposición de audio y s
 
 ## 24. Limitaciones
 
-FLEURS es habla leída; no representa conversaciones espontáneas. Una sola ejecución LLM no mide variabilidad. La similitud speaker es un baseline vulnerable a ruido y suplantación. No hay medición física en este borrador, y la telemetría VRAM puede no estar disponible bajo WSL. El servicio no es un sistema de producción multiusuario y la captura a terceros plantea cuestiones legales y éticas no automatizadas.
+FLEURS es habla leída; no representa conversaciones espontáneas. Una sola ejecución LLM no mide variabilidad. La prueba física detectó un falso positivo del VAD que no estaba cubierto por los tests sintéticos y motivó su calibración y endurecimiento. La similitud speaker fue no discriminativa en la prueba física mínima: el vector `[mean, energy, zero-crossing-rate]` y el coseno saturaron en 1.0000 para ambas voces. No se dispone de FAR/FRR formales, por lo que SMART no debe presentarse como privacidad basada en identidad. La segmentación puede dividir una frase por una pausa larga. La batería, la precisión general del VAD y la telemetría VRAM no están medidas bajo WSL. El servicio no es un sistema de producción multiusuario y la captura a terceros plantea cuestiones legales y éticas no automatizadas.
 
 ## 25. Conclusiones
 
-El repositorio implementa un MVP reproducible con contratos claros, transcripción local, análisis estructurado y persistencia consultable. El diseño avanzado Android hace explícita la diferencia entre captura manual, conservación continua y selección experimental. La conclusión cuantitativa debe esperar a los artefactos reales de evaluación y validación física.
+El repositorio implementa un MVP reproducible con contratos claros, transcripción local, análisis estructurado y persistencia consultable. El diseño avanzado Android hace explícita la diferencia entre captura manual, conservación continua y selección experimental. La validación física demuestra una mejora concreta del VAD frente al falso positivo inicial, pero también establece que la similitud acústica actual no discrimina hablantes en las condiciones probadas.
 
 ## 26. Trabajo futuro
 
-Validar con dispositivo consentido, calibrar VAD/speaker, medir energía, mejorar reintentos con idempotencia si el requisito aparece, estudiar un LLM local pequeño, autenticación y despliegue seguro. Diarización y multiusuario quedan fuera del cierre actual.
+Medir batería, ampliar la validación del VAD con corpus consentido y rediseñar la similitud acústica solo como trabajo futuro separado; no elevar el umbral actual como respuesta a scores saturados. Mejorar reintentos con idempotencia si el requisito aparece, estudiar un LLM local pequeño, autenticación y despliegue seguro. Diarización y multiusuario quedan fuera del cierre actual.
 
 ## 27. Reproducibilidad
 

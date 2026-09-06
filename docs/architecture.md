@@ -141,12 +141,15 @@ permanecen en una cola privada acotada de `cacheDir`; no hay retries automático
 idempotencia todavía, por lo que el reintento debe ser explícito. El servicio no se
 inicia automáticamente.
 
-El modo inteligente es experimental: un ring buffer de 1 s aporta pre-roll, un VAD
-energético adaptativo descarta silencio y solo entonces se aplica una similitud
-coseno contra una plantilla acústica local creada mediante enrollment explícito. La
-plantilla no es autenticación, no identifica a terceros y nunca se envía al backend.
-Si falta enrollment, el modo no comienza. El umbral actual es provisional y debe
-calibrarse con audio consentido; no se presentan métricas de speaker sin medición.
+El modo inteligente es experimental: una calibración inicial de 2 s estima el ruido,
+un ring buffer de 1 s aporta pre-roll, un VAD energético adaptativo exige 10 frames
+consecutivos y cierra tras 800 ms de silencio, y solo entonces se aplica una
+similitud coseno contra una plantilla acústica local creada mediante enrollment
+explícito. La plantilla no es autenticación, no identifica a terceros y nunca se
+envía al backend. Si falta enrollment, el modo no comienza. La validación física
+observó que el VAD mejorado suprime el silencio probado, pero que la similitud
+actual no discrimina hablantes y no debe usarse para afirmar privacidad basada en
+identidad.
 
 ```mermaid
 flowchart LR

@@ -8,5 +8,5 @@
 | Persistencia | SQLAlchemy/Alembic | `app/models.py`, `repositories.py` | `test_persistence.py` | migración + API | implementado | concurrencia escala |
 | Histórico/día | rutas y ViewModels | `app/main.py`, `DiaryViewModels.kt` | backend + JVM | dispositivo | implementado | timezone UI |
 | Continuous | FGS, PCM16, chunks, cola | `CaptureForegroundService.kt` | `SmartAudioTest` parcial | dispositivo | implementado, físico pendiente | interrupciones Android |
-| Smart experimental | VAD, ring, similarity | `SmartAudio.kt` | `SmartAudioTest` | corpus sintético/físico | baseline | no biometría |
+| Smart experimental | VAD, ring, similarity | `SmartAudio.kt` | `SmartAudioTest` | corpus sintético + Pixel 8 limitado | MEASURED físico limitado; baseline speaker no discriminativo | no biometría, sin FAR/FRR |
 | Privacidad | cache privada, no audio al LLM | arquitectura + manifest | static check | revisión | implementado | terceros/retención |
