@@ -40,6 +40,9 @@ class CaptureForegroundService : Service() {
     private lateinit var queue: SegmentQueue
     private var smartVerifier: AcousticSpeakerSimilarity? = null
     private val wakeups = Channel<Unit>(Channel.CONFLATED)
+    private var uploadCoordinator: SegmentUploadCoordinator? = null
+    private var uploadJob: Job? = null
+    private var stopRequested = false
 
     override fun onCreate() {
         super.onCreate(); queue = SegmentQueue(File(cacheDir, "pending-segments"))
@@ -51,6 +54,7 @@ class CaptureForegroundService : Service() {
         return START_NOT_STICKY
     }
     private fun startCapture(smart: Boolean, backendUrl: String) {
+        stopRequested = false
         if (smart) {
             smartVerifier = AcousticSpeakerSimilarity().also { it.load(getSharedPreferences("audio_diary", MODE_PRIVATE).getString("speaker_template", "") ?: "") }
             if (smartVerifier?.hasEnrollment() != true) { stopSelf(); return }
@@ -63,8 +67,13 @@ class CaptureForegroundService : Service() {
             .setContentText("El micrófono está activo").setOngoing(true)
             .addAction(0, "DETENER", stopPending).build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(NOTIFICATION, notification)
+        val backend = RetrofitBackendRepository()
+        uploadCoordinator = SegmentUploadCoordinator(queue) { item ->
+            backend.process(CapturedAudio(item.file, item.recordedAt), backendUrl)
+            increment("sent")
+        }
         recordingJob = scope.launch { captureLoop(smart) }
-        scope.launch { uploadLoop(backendUrl) }
+        uploadJob = scope.launch { uploadLoop() }
     }
     private suspend fun captureLoop(smart: Boolean) {
         val minimum = AudioRecord.getMinBufferSize(AUDIO_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -92,19 +101,29 @@ class CaptureForegroundService : Service() {
         val directory = File(cacheDir, "pending-segments"); directory.mkdirs(); val file = File(directory, "segment-${recordedAt.toEpochMilli()}-${UUID.randomUUID()}.wav")
         WavWriter.write(file, samples); if (queue.offer(PendingSegment(file, recordedAt))) { increment("enqueued"); wakeups.trySend(Unit) } else { increment("discarded"); file.delete() }
     }
-    private suspend fun uploadLoop(backendUrl: String) {
+    private suspend fun uploadLoop() {
         wakeups.trySend(Unit)
         while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-            wakeups.receive(); var item = queue.poll()
-            while (item != null) {
-                try { RetrofitBackendRepository().process(CapturedAudio(item.file, item.recordedAt), backendUrl); increment("sent"); item.file.delete() }
-                catch (_: Exception) { queue.requeue(item); break }
-                item = queue.poll()
-            }
+            wakeups.receive()
+            uploadCoordinator?.drain()
+            if (stopRequested) return
         }
     }
     private fun increment(key: String) { val prefs = getSharedPreferences("audio_diary", MODE_PRIVATE); prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply() }
-    private fun stopCapture() { recordingJob?.cancel(); recorder?.let { runCatching { it.stop(); it.release() }; recorder = null }; wakeups.trySend(Unit); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+    private fun stopCapture() {
+        if (stopRequested) return
+        stopRequested = true
+        val activeRecording = recordingJob
+        activeRecording?.cancel()
+        recorder?.let { runCatching { it.stop(); it.release() }; recorder = null }
+        scope.launch {
+            activeRecording?.join()
+            wakeups.trySend(Unit)
+            uploadJob?.join()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
     override fun onDestroy() { recordingJob?.cancel(); recorder?.let { runCatching { it.stop(); it.release() } }; scope.cancel(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
 }

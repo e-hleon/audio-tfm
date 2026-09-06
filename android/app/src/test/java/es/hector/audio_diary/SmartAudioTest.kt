@@ -4,6 +4,10 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -43,6 +47,30 @@ class SmartAudioTest {
     @Test fun queue_rejects_beyond_capacity_and_requeues_failures() {
         val queue = SegmentQueue(createTempDir("queue"), 1); val first = PendingSegment(File.createTempFile("one", ".wav"), Instant.EPOCH); val second = PendingSegment(File.createTempFile("two", ".wav"), Instant.EPOCH)
         assertTrue(queue.offer(first)); assertFalse(queue.offer(second)); assertEquals(first, queue.poll()); queue.requeue(first); assertEquals(1, queue.size); first.file.delete(); second.file.delete()
+    }
+    @Test fun drain_uploads_complete_and_partial_segments_in_order() = runTest {
+        val directory = createTempDir("upload"); val queue = SegmentQueue(directory, 4)
+        val complete = PendingSegment(File(directory, "complete.wav").also { it.writeText("complete") }, Instant.EPOCH)
+        val partial = PendingSegment(File(directory, "partial.wav").also { it.writeText("partial") }, Instant.EPOCH.plusSeconds(30))
+        queue.offer(complete); queue.offer(partial); val uploaded = CopyOnWriteArrayList<String>()
+        val coordinator = SegmentUploadCoordinator(queue) { uploaded += it.file.name }
+        assertTrue(coordinator.drain()); assertEquals(listOf("complete.wav", "partial.wav"), uploaded.toList()); assertEquals(0, queue.size)
+        assertFalse(complete.file.exists()); assertFalse(partial.file.exists()); directory.deleteRecursively()
+    }
+    @Test fun concurrent_drains_have_one_effective_consumer() = runTest {
+        val directory = createTempDir("upload-race"); val queue = SegmentQueue(directory, 2)
+        val segment = PendingSegment(File(directory, "only.wav").also { it.writeText("only") }, Instant.EPOCH); queue.offer(segment)
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>(); var attempts = 0
+        val coordinator = SegmentUploadCoordinator(queue) { attempts++; started.complete(Unit); release.await() }
+        val first = async { coordinator.drain() }; started.await(); val second = async { coordinator.drain() }
+        assertFalse(second.isCompleted); release.complete(Unit); assertTrue(first.await()); assertTrue(second.await()); assertEquals(1, attempts)
+        directory.deleteRecursively()
+    }
+    @Test fun failed_drain_requeues_segment_for_a_later_action() = runTest {
+        val directory = createTempDir("upload-failure"); val queue = SegmentQueue(directory, 2)
+        val segment = PendingSegment(File(directory, "pending.wav").also { it.writeText("pending") }, Instant.EPOCH); queue.offer(segment)
+        val coordinator = SegmentUploadCoordinator(queue) { error("network unavailable") }
+        assertFalse(coordinator.drain()); assertEquals(1, queue.size); assertTrue(segment.file.exists()); directory.deleteRecursively()
     }
     @Test fun segmenter_includes_preroll_and_closes_after_silence() {
         val segmenter = SmartSegmenter(preRollFrames = 2, minimumSpeechFrames = 1, endingSilenceFrames = 2, clock = { Instant.EPOCH })

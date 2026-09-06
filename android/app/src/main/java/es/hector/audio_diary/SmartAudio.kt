@@ -9,7 +9,10 @@ import java.io.FileOutputStream
 import java.time.Instant
 import kotlin.math.log10
 import kotlin.math.sqrt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 const val AUDIO_SAMPLE_RATE = 16_000
@@ -134,6 +137,28 @@ class SegmentQueue(private val directory: File, private val maxSegments: Int = 2
     @Synchronized fun requeue(segment: PendingSegment) { if (pending.size < maxSegments) pending.addFirst(segment) }
     @get:Synchronized val size: Int get() = pending.size
     val capacity: Int get() = maxSegments
+}
+
+/** Serializa el drenaje: solo puede existir un consumidor efectivo de la cola. */
+class SegmentUploadCoordinator(
+    private val queue: SegmentQueue,
+    private val upload: suspend (PendingSegment) -> Unit
+) {
+    private val mutex = Mutex()
+
+    suspend fun drain(): Boolean = mutex.withLock {
+        while (true) {
+            val segment = queue.poll() ?: return@withLock true
+            try {
+                upload(segment)
+                segment.file.delete()
+            } catch (error: Exception) {
+                queue.requeue(segment)
+                if (error is CancellationException) throw error
+                return@withLock false
+            }
+        }
+    }
 }
 
 object WavWriter {
