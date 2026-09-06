@@ -58,10 +58,16 @@ class PcmFramer(private val frameSamples: Int = AUDIO_FRAME_SAMPLES) {
 /** Baseline VAD energético adaptativo; no es un modelo de aprendizaje automático. */
 class EnergyVad(
     private val initialNoiseDb: Double = -55.0,
-    private val marginDb: Double = 10.0,
-    private val hysteresisDb: Double = 3.0
+    private val marginDb: Double = 12.0,
+    private val hysteresisDb: Double = 3.0,
+    private val calibrationFrames: Int = 100
 ) {
+    init { require(calibrationFrames >= 0) { "La calibración no puede ser negativa" } }
     private var noiseDb = initialNoiseDb
+    private val calibration = ArrayList<Double>(calibrationFrames)
+    var calibrated: Boolean = calibrationFrames == 0
+        private set
+
     fun energyDb(frame: ShortArray): Double {
         if (frame.isEmpty()) return -160.0
         val sum = frame.fold(0.0) { total, sample -> total + sample.toDouble() * sample.toDouble() }
@@ -70,8 +76,17 @@ class EnergyVad(
     }
     fun isSpeech(frame: ShortArray, previousSpeech: Boolean = false): Boolean {
         val current = energyDb(frame)
-        if (current < noiseDb + marginDb) noiseDb = noiseDb * .98 + current * .02
-        return current >= noiseDb + marginDb - if (previousSpeech) hysteresisDb else 0.0
+        if (!calibrated) {
+            calibration += current
+            if (calibration.size == calibrationFrames) {
+                noiseDb = calibration.sorted()[calibration.size / 2]
+                calibrated = true
+            }
+            return false
+        }
+        val speech = current >= noiseDb + marginDb - if (previousSpeech) hysteresisDb else 0.0
+        if (!speech) noiseDb = noiseDb * .98 + current * .02
+        return speech
     }
 }
 
@@ -182,21 +197,58 @@ enum class SmartState { SILENCE, POSSIBLE_SPEECH, SPEECH, ENDING }
 data class SmartSegment(val samples: ShortArray, val recordedAt: Instant)
 class SmartSegmenter(
     private val vad: EnergyVad = EnergyVad(), private val preRollFrames: Int = 50,
-    private val minimumSpeechFrames: Int = 3, private val endingSilenceFrames: Int = 40,
+    private val minimumSpeechFrames: Int = 10, private val endingSilenceFrames: Int = 40,
     private val maximumFrames: Int = 2_250, private val clock: () -> Instant = { Instant.now() }
 ) {
     init { require(preRollFrames > 0 && minimumSpeechFrames > 0 && endingSilenceFrames > 0 && maximumFrames > 0) }
     private val preRoll = PcmRingBuffer(preRollFrames * AUDIO_FRAME_SAMPLES)
-    private val current = ArrayList<Short>(); private var speechFrames = 0; private var silentFrames = 0; private var segmentStart: Instant? = null
+    private val current = ArrayList<Short>(); private var consecutiveSpeechFrames = 0; private var voicedSamples = 0; private var silentFrames = 0; private var segmentStart: Instant? = null
     var state = SmartState.SILENCE; private set
     fun accept(frame: ShortArray): SmartSegment? {
         val speech = vad.isSpeech(frame, state == SmartState.SPEECH || state == SmartState.ENDING)
-        if (state == SmartState.SILENCE) { preRoll.add(frame); if (speech) { state = SmartState.POSSIBLE_SPEECH; segmentStart = clock(); current.addAll(preRoll.snapshot().toList()); speechFrames = 1 } }
-        else { current.addAll(frame.toList()); if (speech) { speechFrames++; silentFrames = 0; state = SmartState.SPEECH } else if (state == SmartState.SPEECH || state == SmartState.POSSIBLE_SPEECH || state == SmartState.ENDING) { silentFrames++; state = SmartState.ENDING } }
-        val close = (state == SmartState.ENDING && silentFrames >= endingSilenceFrames && speechFrames >= minimumSpeechFrames) || current.size >= maximumFrames * AUDIO_FRAME_SAMPLES
-        if (close) return finish()
+        when (state) {
+            SmartState.SILENCE -> {
+                preRoll.add(frame)
+                if (speech) {
+                    state = SmartState.POSSIBLE_SPEECH
+                    segmentStart = clock()
+                    current.addAll(preRoll.snapshot().toList())
+                    consecutiveSpeechFrames = 1
+                    voicedSamples = frame.size
+                }
+            }
+            SmartState.POSSIBLE_SPEECH -> {
+                current.addAll(frame.toList())
+                if (speech) {
+                    consecutiveSpeechFrames++
+                    voicedSamples += frame.size
+                    silentFrames = 0
+                    if (consecutiveSpeechFrames >= minimumSpeechFrames) state = SmartState.SPEECH
+                } else {
+                    consecutiveSpeechFrames = 0
+                    silentFrames++
+                    if (silentFrames >= endingSilenceFrames) resetCandidate()
+                }
+            }
+            SmartState.SPEECH, SmartState.ENDING -> {
+                current.addAll(frame.toList())
+                if (speech) {
+                    state = SmartState.SPEECH
+                    silentFrames = 0
+                    voicedSamples += frame.size
+                } else {
+                    state = SmartState.ENDING
+                    silentFrames++
+                }
+            }
+        }
+        if (current.size >= maximumFrames * AUDIO_FRAME_SAMPLES) {
+            if (state == SmartState.SPEECH || state == SmartState.ENDING) return finish()
+            resetCandidate()
+        }
         return null
     }
-    fun stop(): SmartSegment? = if (current.isNotEmpty() && speechFrames >= minimumSpeechFrames) finish() else { current.clear(); state = SmartState.SILENCE; null }
-    private fun finish(): SmartSegment { val result = SmartSegment(current.toShortArray(), segmentStart ?: clock()); current.clear(); speechFrames = 0; silentFrames = 0; segmentStart = null; state = SmartState.SILENCE; return result }
+    fun stop(): SmartSegment? = if (current.isNotEmpty() && state != SmartState.POSSIBLE_SPEECH && voicedSamples >= minimumSpeechFrames * AUDIO_FRAME_SAMPLES) finish() else { resetCandidate(); null }
+    private fun resetCandidate() { current.clear(); consecutiveSpeechFrames = 0; voicedSamples = 0; silentFrames = 0; segmentStart = null; state = SmartState.SILENCE }
+    private fun finish(): SmartSegment { val result = SmartSegment(current.toShortArray(), segmentStart ?: clock()); resetCandidate(); return result }
 }

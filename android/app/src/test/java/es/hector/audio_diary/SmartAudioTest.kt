@@ -29,7 +29,9 @@ class SmartAudioTest {
         } finally { file.delete() }
     }
     @Test fun energy_vad_rejects_silence_and_accepts_signal() {
-        val vad = EnergyVad(); assertTrue(vad.energyDb(shortArrayOf()).isFinite()); assertFalse(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES))); assertTrue(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }))
+        val vad = EnergyVad(); assertTrue(vad.energyDb(shortArrayOf()).isFinite())
+        repeat(100) { assertFalse(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES))) }
+        assertTrue(vad.calibrated); assertFalse(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES))); assertTrue(vad.isSpeech(ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }))
     }
     @Test fun framer_turns_partial_reads_into_fixed_frames() {
         val framer = PcmFramer(4); assertTrue(framer.add(shortArrayOf(1, 2)).isEmpty()); val frames = framer.add(shortArrayOf(3, 4, 5, 6))
@@ -73,9 +75,53 @@ class SmartAudioTest {
         assertFalse(coordinator.drain()); assertEquals(1, queue.size); assertTrue(segment.file.exists()); directory.deleteRecursively()
     }
     @Test fun segmenter_includes_preroll_and_closes_after_silence() {
-        val segmenter = SmartSegmenter(preRollFrames = 2, minimumSpeechFrames = 1, endingSilenceFrames = 2, clock = { Instant.EPOCH })
+        val segmenter = SmartSegmenter(vad = EnergyVad(calibrationFrames = 0), preRollFrames = 2, minimumSpeechFrames = 1, endingSilenceFrames = 2, clock = { Instant.EPOCH })
         val silent = ShortArray(AUDIO_FRAME_SAMPLES); val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }
         segmenter.accept(silent); segmenter.accept(silent); segmenter.accept(voice); segmenter.accept(silent)
         val result = segmenter.accept(silent); assertNotNull(result); assertTrue(result!!.samples.size >= AUDIO_FRAME_SAMPLES * 3); assertEquals(Instant.EPOCH, result.recordedAt)
     }
+    @Test fun constant_noise_during_calibration_does_not_start_a_segment() {
+        val segmenter = calibratedSegmenter(); val noise = ShortArray(AUDIO_FRAME_SAMPLES) { 1_000 }
+        repeat(100) { assertNull(segmenter.accept(noise)) }; repeat(40) { assertNull(segmenter.accept(noise)) }
+        assertEquals(SmartState.SILENCE, segmenter.state)
+    }
+    @Test fun silence_after_calibration_does_not_start_a_segment() {
+        val segmenter = calibratedSegmenter(); val silence = ShortArray(AUDIO_FRAME_SAMPLES)
+        repeat(100) { segmenter.accept(silence) }; repeat(80) { assertNull(segmenter.accept(silence)) }
+        assertEquals(SmartState.SILENCE, segmenter.state)
+    }
+    @Test fun transient_shorter_than_two_hundred_milliseconds_is_discarded() {
+        val segmenter = calibratedSegmenter(); val silence = ShortArray(AUDIO_FRAME_SAMPLES); val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }
+        repeat(100) { segmenter.accept(silence) }; repeat(9) { assertNull(segmenter.accept(voice)) }; repeat(40) { assertNull(segmenter.accept(silence)) }
+        assertEquals(SmartState.SILENCE, segmenter.state)
+    }
+    @Test fun sustained_voice_longer_than_two_hundred_milliseconds_forms_a_segment() {
+        val segmenter = calibratedSegmenter(); val silence = ShortArray(AUDIO_FRAME_SAMPLES); val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }
+        repeat(100) { segmenter.accept(silence) }; repeat(11) { assertNull(segmenter.accept(voice)) }
+        var result: SmartSegment? = null; repeat(40) { result = segmenter.accept(silence) ?: result }
+        assertNotNull(result); assertTrue(result!!.samples.size >= AUDIO_FRAME_SAMPLES * 11)
+    }
+    @Test fun separated_short_bursts_do_not_accumulate_as_consecutive_voice() {
+        val segmenter = calibratedSegmenter(); val silence = ShortArray(AUDIO_FRAME_SAMPLES); val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }
+        repeat(100) { segmenter.accept(silence) }; repeat(5) { segmenter.accept(voice) }; repeat(20) { segmenter.accept(silence) }; repeat(5) { segmenter.accept(voice) }
+        repeat(40) { assertNull(segmenter.accept(silence)) }; assertEquals(SmartState.SILENCE, segmenter.state)
+    }
+    @Test fun stop_during_insufficient_candidate_does_not_flush_a_segment() {
+        val segmenter = calibratedSegmenter(); val silence = ShortArray(AUDIO_FRAME_SAMPLES); val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }
+        repeat(100) { segmenter.accept(silence) }; repeat(5) { segmenter.accept(voice) }
+        assertNull(segmenter.stop()); assertEquals(SmartState.SILENCE, segmenter.state)
+    }
+    @Test fun stop_flushes_a_valid_smart_segment() {
+        val segmenter = calibratedSegmenter(); val silence = ShortArray(AUDIO_FRAME_SAMPLES); val voice = ShortArray(AUDIO_FRAME_SAMPLES) { 10_000 }
+        repeat(100) { segmenter.accept(silence) }; repeat(10) { segmenter.accept(voice) }
+        val result = segmenter.stop(); assertNotNull(result); assertTrue(result!!.samples.size >= AUDIO_FRAME_SAMPLES * 10); assertEquals(SmartState.SILENCE, segmenter.state)
+    }
+
+    private fun calibratedSegmenter() = SmartSegmenter(
+        vad = EnergyVad(marginDb = 12.0, calibrationFrames = 100),
+        preRollFrames = 2,
+        minimumSpeechFrames = 10,
+        endingSilenceFrames = 40,
+        clock = { Instant.EPOCH },
+    )
 }
