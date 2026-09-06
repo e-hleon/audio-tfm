@@ -7,7 +7,7 @@
 | Persistencia | sí | PostgreSQL fresco | flujo mock | no | MEASURED |
 | DailySummary | sí | timezone/fingerprint | OpenAI real no repetido | no | MEASURED parcial |
 | Manual Android | JVM | CI Android | no | no | CI MEASURED |
-| Continuous | JVM lógico | no | no | no | NOT MEASURED |
+| Continuous | JVM lógico: pausa, hard cap, flush y conservación de samples | API/PostgreSQL: metadata + retry idempotente | no | Pixel 8 ya validó captura física previa; cambios nuevos pendientes | AUTOMATED; PHYSICAL PENDING |
 | Smart | JVM lógico | no | no | Pixel 8: silencio y frases consentidas | MEASURED físico limitado; VAD mejorado, sin precisión general |
 | Speaker baseline | JVM numérico | no | no | Pixel 8: voz propia y otra voz | MEASURED físico mínimo: no discriminativo; FAR/FRR NOT MEASURED |
 | Batería | no | no | no | no | NOT MEASURED |

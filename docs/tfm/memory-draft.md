@@ -75,7 +75,7 @@ La aplicación usa ViewModel/StateFlow para que la UI sobreviva a recomposicione
 
 ## 17. Captura continua
 
-`AudioRecord` usa mono PCM16 a 16 kHz. Las lecturas parciales se acumulan sin perder muestras y se dividen en WAV de aproximadamente 30 segundos; el último segmento puede ser parcial. `SegmentQueue` tiene capacidad limitada y conserva los ficheros fallidos para una futura reanudación del servicio. Las subidas son seriales para hacer explícito el orden y el coste.
+`AudioRecord` usa mono PCM16 a 16 kHz. Las lecturas parciales se acumulan sin perder muestras y se dividen en WAV: no se corta antes de 25 segundos, se busca una pausa acústica de 800 ms y existe un hard cap de 55 segundos; el último segmento puede ser parcial. `SegmentQueue` tiene capacidad limitada y conserva los ficheros fallidos para una futura reanudación del servicio. Las subidas son seriales y cada chunk lleva sesión, índice y UUID idempotente.
 
 ```mermaid
 sequenceDiagram
@@ -85,7 +85,7 @@ sequenceDiagram
   participant API as Backend
   U->>S: Iniciar explícito
   S->>S: startForeground + AudioRecord
-  S->>Q: WAV de 30 s / final parcial
+  S->>Q: WAV de 25–55 s / final parcial
   Q->>API: POST /process secuencial
   U->>S: Detener
   S->>Q: conservar pendientes
@@ -127,7 +127,7 @@ ASR: [RESULTADO REAL PENDIENTE: corpus WER/CER, latencia, RTF, fallos y carga pa
 
 ## 23. Discusión
 
-La separación ASR local/LLM externo permite reducir la exposición de audio y sustituir el proveedor, a costa de enviar texto y depender de conectividad, coste y políticas externas. La persistencia síncrona simplifica las fronteras transaccionales, pero una caída después del commit puede dejar al cliente sin saber si debe reintentar; por eso no se añade retry automático ni idempotencia en esta fase.
+La separación ASR local/LLM externo permite reducir la exposición de audio y sustituir el proveedor, a costa de enviar texto y depender de conectividad, coste y políticas externas. La persistencia síncrona simplifica las fronteras transaccionales; una caída después del commit se mitiga para Continuous con `capture_chunk_id` UNIQUE y devolución del resultado existente en el retry. La segmentación sigue siendo acústica y el análisis semántico sigue siendo por chunk.
 
 ## 24. Limitaciones
 
@@ -139,7 +139,7 @@ El repositorio implementa un MVP reproducible con contratos claros, transcripci�
 
 ## 26. Trabajo futuro
 
-Medir batería, ampliar la validación del VAD con corpus consentido y rediseñar la similitud acústica solo como trabajo futuro separado; no elevar el umbral actual como respuesta a scores saturados. Mejorar reintentos con idempotencia si el requisito aparece, estudiar un LLM local pequeño, autenticación y despliegue seguro. Diarización y multiusuario quedan fuera del cierre actual.
+Medir batería, ampliar la validación del VAD con corpus consentido y estudiar análisis semántico a nivel de sesión con una fuente única para Day. Rediseñar la similitud acústica solo como trabajo futuro separado; no elevar el umbral actual como respuesta a scores saturados. También quedan como futuro un LLM local pequeño, autenticación y despliegue seguro. Diarización y multiusuario quedan fuera del cierre actual.
 
 ## 27. Reproducibilidad
 

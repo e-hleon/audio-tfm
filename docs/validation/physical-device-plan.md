@@ -20,7 +20,7 @@ Descargar el artifact `audio-diary-debug-apk` de CI o localizar `android/app/bui
 
 ## Continuous
 
-Conceder notificaciones, iniciar explícitamente, comprobar notificación persistente, salir de Activity y verificar que continúa. Esperar al menos un chunk, detener, comprobar subida serial, histórico/día, ficheros pendientes y que ningún audio supera 60 s. Provocar una desconexión y verificar que el chunk queda pendiente; no hacer retry automático del POST ambiguo.
+Conceder notificaciones, iniciar explícitamente, comprobar notificación persistente, salir de Activity y verificar que continúa. Esperar al menos un chunk, detener, comprobar subida serial, histórico agrupado por `capture_session_id`, orden por `chunk_index`, ficheros pendientes y que ningún audio supera 55 s. Provocar una desconexión y verificar que el chunk queda pendiente; repetir el mismo chunk y comprobar que el backend devuelve la Interaction existente sin duplicarla. La pausa acústica reduce cortes durante actividad cuando existe una pausa próxima, pero no garantiza una frontera lingüística.
 
 ## Smart
 

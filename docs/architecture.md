@@ -135,11 +135,22 @@ continuas e inteligentes usan `AudioRecord` PCM16 mono a 16 kHz dentro de
 `CaptureForegroundService`: una notificación persistente y una acción STOP hacen
 visible la captura aunque la Activity deje de estar en primer plano.
 
-El audio PCM se procesa en frames de 20 ms y se escribe en WAV en chunks de 30 s,
-por debajo del límite HTTP de 60 s. La subida es secuencial y los archivos fallidos
-permanecen en una cola privada acotada de `cacheDir`; no hay retries automáticos ni
-idempotencia todavía, por lo que el reintento debe ser explícito. El servicio no se
-inicia automáticamente.
+El audio PCM se procesa en frames de 20 ms. Continuous busca una pausa acústica de
+800 ms después de un mínimo de 25 s; si la encuentra corta ahí. Si la actividad no
+pausa, aplica un hard cap de 55 s, por debajo del límite HTTP de 60 s. Es una
+heurística acústica, no un detector lingüístico, por lo que puede seguir cortando
+una frase. La subida es secuencial y los WAV fallidos permanecen en una cola privada
+acotada de `cacheDir`. Cada sesión genera `capture_session_id`, cada chunk un
+`chunk_index` y `capture_chunk_id`; este último tiene restricción UNIQUE para que un
+retry no cree otra Interaction. Los registros legacy siguen siendo válidos.
+
+La unidad técnica es el chunk; la unidad lógica que el cliente puede agrupar es la
+sesión Continuous. El backend todavía analiza y persiste cada chunk por separado:
+no se presenta aún un análisis semántico de sesión ni se suman sus transcripciones
+en segundo plano. Por ello Day conserva la agregación histórica por Interaction y
+la continuidad de ideas a través de un borde sigue siendo una limitación conocida.
+El servicio no se inicia automáticamente y STOP hace flush del chunk parcial antes
+de drenar la cola.
 
 El modo inteligente es experimental: una calibración inicial de 2 s estima el ruido,
 un ring buffer de 1 s aporta pre-roll, un VAD energético adaptativo exige 10 frames
@@ -155,7 +166,7 @@ identidad.
 flowchart LR
   A[MediaRecorder manual] --> B[M4A /process]
   C[AudioRecord PCM16] --> D{modo}
-  D --> E[Continuo: chunks WAV 30 s]
+  D --> E[Continuo: chunks WAV 25–55 s]
   D --> F[Inteligente: VAD + pre-roll]
   E --> G[cola privada acotada]
   F --> G
