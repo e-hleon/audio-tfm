@@ -22,7 +22,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
-    private val viewModel by viewModels<CaptureViewModel> { object : ViewModelProvider.Factory { @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>) = CaptureViewModel(MediaRecorderAudioRecorder(this@MainActivity), RetrofitBackendRepository()) as T } }
+    private val viewModel by viewModels<CaptureViewModel> { object : ViewModelProvider.Factory { @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>) = CaptureViewModel(MediaRecorderAudioRecorder(this@MainActivity.applicationContext), RetrofitBackendRepository()) as T } }
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); clearAbandonedCaptures(cacheDir); setContent { DiaryApp(viewModel, RetrofitBackendRepository(), getSharedPreferences("audio_diary", Context.MODE_PRIVATE)) } }
     override fun onStop() { viewModel.cancelIfRecording(); super.onStop() }
 }
