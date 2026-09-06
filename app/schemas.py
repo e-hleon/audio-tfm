@@ -51,6 +51,10 @@ class InteractionTranscription(StrictModel):
 
 class InteractionResponse(StrictModel):
     id: UUID
+    capture_mode: str
+    capture_session_id: UUID | None
+    chunk_index: int | None
+    capture_chunk_id: UUID | None
     recorded_at: datetime
     created_at: datetime
     transcription: InteractionTranscription

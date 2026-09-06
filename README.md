@@ -281,7 +281,9 @@ modelo y configuración.
 La app también ofrece Histórico y Día, además de captura manual, continua e
 inteligente. Manual conserva `MediaRecorder`/M4A. Continua usa `AudioRecord` PCM16
 mono a 16 kHz, `ForegroundService`, notificación persistente, STOP explícito y
-chunks WAV de 30 s que se suben de uno en uno desde una cola privada acotada.
+chunks WAV con mínimo de 25 s y hard cap de 55 s que se suben de uno en uno desde
+una cola privada acotada. Continuous asigna una sesión, índice de chunk y clave
+idempotente para evitar duplicados tras un retry.
 
 Inteligente es experimental: usa frames de 20 ms, VAD energético adaptativo, un
 pre-roll de aproximadamente un segundo y una plantilla acústica local registrada

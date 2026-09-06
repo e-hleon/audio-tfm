@@ -9,6 +9,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BackendTest {
+    @Test fun history_groups_only_continuous_chunks_of_the_same_session() {
+        val analysis = Analysis("summary", emptyList(), emptyList(), emptyList(), emptyList())
+        fun item(id: String, mode: String, session: String?, index: Int?) = InteractionResponse(
+            id, "2026-09-05T10:00:00Z", "2026-09-05T10:00:00Z",
+            Transcription("text", "es", "base"), analysis, captureMode = mode,
+            captureSessionId = session, chunkIndex = index,
+        )
+        val groups = groupContinuousSessions(listOf(
+            item("b", "continuous", "s1", 1), item("a", "continuous", "s1", 0),
+            item("c", "continuous", "s2", 0), item("legacy", "manual", null, null),
+        ))
+        assertEquals(listOf(listOf("a", "b"), listOf("c"), listOf("legacy")), groups.map { it.map(InteractionResponse::id) })
+    }
     @Test fun normalizes_valid_url_and_rejects_invalid_one() {
         assertEquals("http://example.test:8000/", normalizeBackendUrl(" http://example.test:8000/ "))
         assertFails { normalizeBackendUrl("example.test") }
@@ -17,7 +30,7 @@ class BackendTest {
         val server = MockWebServer(); server.start()
         server.enqueue(MockResponse().setResponseCode(200).setBody(responseJson))
         val file = File.createTempFile("audio", ".m4a").apply { writeBytes(byteArrayOf(1, 2)) }
-        val result = RetrofitBackendRepository().process(CapturedAudio(file, Instant.parse("2026-09-05T10:00:00Z")), server.url("/").toString())
+        val result = RetrofitBackendRepository().process(CapturedAudio(file, Instant.parse("2026-09-05T10:00:00Z"), "continuous", "11111111-1111-1111-1111-111111111111", 2, "22222222-2222-2222-2222-222222222222"), server.url("/").toString())
         val request = server.takeRequest()
         val body = request.body.readUtf8()
         assertEquals("POST", request.method)
@@ -25,6 +38,9 @@ class BackendTest {
         assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data"))
         assertTrue(body.contains("name=\"file\"")); assertTrue(body.contains(file.name)); assertTrue(body.contains("audio/mp4"))
         assertTrue(body.contains("name=\"recorded_at\"")); assertTrue(body.contains("2026-09-05T10:00:00Z"))
+        assertTrue(body.contains("name=\"capture_mode\"")); assertTrue(body.contains("continuous"))
+        assertTrue(body.contains("name=\"capture_session_id\"")); assertTrue(body.contains("11111111-1111-1111-1111-111111111111"))
+        assertTrue(body.contains("name=\"chunk_index\"")); assertTrue(body.contains("name=\"capture_chunk_id\""))
         assertEquals("id-1", result.interactionId); assertEquals("hola", result.transcription.text)
         assertEquals("d", result.analysis.decisions.single().text); assertEquals("t", result.analysis.tasks.single().text); assertEquals("r", result.analysis.reminders.single().text)
         file.delete(); server.shutdown()

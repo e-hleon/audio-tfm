@@ -9,6 +9,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 sealed interface HistoryState { data object Idle : HistoryState; data object Loading : HistoryState; data class Ready(val items: List<InteractionResponse>) : HistoryState; data class Detail(val item: InteractionResponse) : HistoryState; data class Error(val message: String) : HistoryState }
+fun groupContinuousSessions(items: List<InteractionResponse>): List<List<InteractionResponse>> {
+    val groups = linkedMapOf<String, MutableList<InteractionResponse>>()
+    items.sortedByDescending { it.recordedAt }.forEach { item ->
+        val key = if (item.captureMode == "continuous" && item.captureSessionId != null) {
+            "continuous:${item.captureSessionId}"
+        } else "interaction:${item.id}"
+        groups.getOrPut(key) { mutableListOf() }.add(item)
+    }
+    return groups.values.map { group -> group.sortedWith(compareBy<InteractionResponse> { it.chunkIndex ?: Int.MAX_VALUE }.thenBy { it.recordedAt }) }
+}
 class HistoryViewModel(private val backend: BackendRepository) : ViewModel() {
     private val mutable = MutableStateFlow<HistoryState>(HistoryState.Idle); val state: StateFlow<HistoryState> = mutable.asStateFlow()
     fun load(url: String) { mutable.value = HistoryState.Loading; viewModelScope.launch { runCatching { backend.interactions(url) }.onSuccess { mutable.value = HistoryState.Ready(it.sortedByDescending { item -> item.recordedAt }) }.onFailure { mutable.value = HistoryState.Error(errorMessage(it)) } } }

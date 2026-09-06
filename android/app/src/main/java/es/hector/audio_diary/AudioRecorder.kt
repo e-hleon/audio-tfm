@@ -31,7 +31,7 @@ class MediaRecorderAudioRecorder(private val context: Context, private val clock
     }
     override fun stop(): CapturedAudio {
         val current = checkNotNull(captured) { "No hay grabación activa" }
-        try { recorder?.stop() } finally { recorder?.release(); recorder = null }
+        try { recorder?.stop() } finally { recorder?.release(); recorder = null; captured = null }
         return current
     }
     override fun discard() { runCatching { recorder?.stop() }; recorder?.release(); recorder = null; captured?.file?.delete(); captured = null }

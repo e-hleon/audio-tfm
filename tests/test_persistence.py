@@ -255,6 +255,28 @@ def test_http_process_and_history_against_postgresql(db_engine, session):
         assert client.get("/interactions/not-a-uuid").status_code == 422
 
 
+def test_continuous_metadata_and_retry_are_idempotent(db_engine, session):
+    session_id = "11111111-1111-1111-1111-111111111111"
+    chunk_id = "22222222-2222-2222-2222-222222222222"
+    data = {
+        "recorded_at": "2026-09-05T10:00:00Z",
+        "capture_mode": "continuous",
+        "capture_session_id": session_id,
+        "chunk_index": "3",
+        "capture_chunk_id": chunk_id,
+    }
+    with TestClient(create_app(HttpFakeTranscriber, HttpFakeAnalyzer, lambda: Session(db_engine))) as client:
+        first = client.post("/process", files={"file": ("chunk.wav", b"synthetic")}, data=data)
+        second = client.post("/process", files={"file": ("chunk.wav", b"synthetic")}, data=data)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["interaction_id"] == second.json()["interaction_id"]
+    assert second.json()["capture_session_id"] == session_id
+    assert second.json()["chunk_index"] == 3
+    assert second.json()["capture_chunk_id"] == chunk_id
+    assert session.query(Interaction).filter(Interaction.capture_chunk_id == chunk_id).count() == 1
+
+
 def test_http_history_limit_offset_and_timezone_filters(db_engine, session):
     for hour in (8, 9, 10):
         create_interaction(session, **interaction_values(datetime(2026, 9, 5, hour, tzinfo=timezone.utc)))

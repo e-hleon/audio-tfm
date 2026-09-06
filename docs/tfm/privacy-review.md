@@ -1,15 +1,10 @@
 # Revisión de privacidad
 
-- El permiso usado es `RECORD_AUDIO`; el servicio declara únicamente tipo
-  `microphone` y solo arranca por acción explícita.
-- La captura continua/inteligente muestra notificación persistente y acción STOP.
-- Manual conserva M4A temporal; continuo escribe WAV en `cacheDir` y borra tras
-  éxito. Los segmentos rechazados del selector no se guardan.
-- El enrollment guarda solo tres características en preferencias privadas. La
-  plantilla no sale del dispositivo, no se usa para identificar terceros y no es
-  autenticación.
-- `/process` envía audio al backend; el backend envía únicamente la transcripción
-  al proveedor LLM, con `store=false`. Las notificaciones no incluyen texto privado.
-- El backend sigue ligado a loopback por defecto; LAN es una configuración explícita
-  para red confiable y no se ha añadido autenticación.
-- No hay claves, grabaciones personales ni modelos grandes versionados.
+| Permiso | Motivo | Modo | Consecuencia |
+|---|---|---|---|
+| `RECORD_AUDIO` | Capturar voz | manual, continuous, smart, enrollment | Puede registrar a quien esté cerca; requiere consentimiento. |
+| `FOREGROUND_SERVICE` | Ejecutar captura visible | continuous, smart | La sesión puede continuar al salir de Activity; hay notificación y STOP. |
+| `FOREGROUND_SERVICE_MICROPHONE` | Tipo específico Android 14+ | continuous, smart | Android controla el acceso al micrófono del servicio. |
+| `POST_NOTIFICATIONS` | Mostrar notificación Android 13+ | continuous, smart | Si se deniega, la UI no inicia esos modos. |
+
+No se solicitan permisos de almacenamiento. M4A/WAV y plantilla quedan en almacenamiento privado/cache; el éxito elimina audio manual y los segmentos enviados. ASR procesa localmente. Solo texto/proyección derivada puede salir al proveedor LLM; no se envían audio, filename ni template speaker. `store=false` reduce estado persistido de la respuesta, pero no promete retención cero. La revisión física debe comprobar ficheros y consentimiento de terceros.

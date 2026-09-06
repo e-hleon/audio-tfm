@@ -5,13 +5,24 @@ import java.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-data class CapturedAudio(val file: File, val recordedAt: Instant)
+data class CapturedAudio(
+    val file: File,
+    val recordedAt: Instant,
+    val captureMode: String = "manual",
+    val captureSessionId: String? = null,
+    val chunkIndex: Int? = null,
+    val captureChunkId: String? = null,
+)
 
 @Serializable data class ProcessResponse(
     @SerialName("interaction_id") val interactionId: String,
     @SerialName("recorded_at") val recordedAt: String,
     @SerialName("created_at") val createdAt: String,
-    val transcription: Transcription, val analysis: Analysis
+    val transcription: Transcription, val analysis: Analysis,
+    @SerialName("capture_mode") val captureMode: String = "manual",
+    @SerialName("capture_session_id") val captureSessionId: String? = null,
+    @SerialName("chunk_index") val chunkIndex: Int? = null,
+    @SerialName("capture_chunk_id") val captureChunkId: String? = null,
 )
 @Serializable data class Transcription(val text: String, val language: String? = null, val model: String, val device: String? = null, @SerialName("compute_type") val computeType: String? = null)
 @Serializable data class Analysis(val summary: String, val topics: List<String>, val decisions: List<Decision>, val tasks: List<Task>, val reminders: List<Reminder>)
@@ -22,7 +33,11 @@ data class CapturedAudio(val file: File, val recordedAt: Instant)
 @Serializable data class InteractionResponse(
     val id: String, @SerialName("recorded_at") val recordedAt: String,
     @SerialName("created_at") val createdAt: String, val transcription: Transcription,
-    val analysis: Analysis, @SerialName("analysis_model") val analysisModel: String? = null
+    val analysis: Analysis, @SerialName("analysis_model") val analysisModel: String? = null,
+    @SerialName("capture_mode") val captureMode: String = "manual",
+    @SerialName("capture_session_id") val captureSessionId: String? = null,
+    @SerialName("chunk_index") val chunkIndex: Int? = null,
+    @SerialName("capture_chunk_id") val captureChunkId: String? = null,
 )
 @Serializable data class DailySummaryState(
     val status: String, val result: DailySummaryResult? = null,
