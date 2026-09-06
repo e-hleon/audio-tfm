@@ -9,9 +9,9 @@ import org.junit.Test
 
 class SmartAudioTest {
     @Test fun invalid_fixed_buffer_parameters_are_rejected() {
-        assertFailsWith<IllegalArgumentException> { PcmRingBuffer(0) }
-        assertFailsWith<IllegalArgumentException> { PcmFramer(0) }
-        assertFailsWith<IllegalArgumentException> { SegmentQueue(createTempDir("queue"), 0) }
+        assertThrows(IllegalArgumentException::class.java) { PcmRingBuffer(0) }
+        assertThrows(IllegalArgumentException::class.java) { PcmFramer(0) }
+        assertThrows(IllegalArgumentException::class.java) { SegmentQueue(createTempDir("queue"), 0) }
     }
     @Test fun ring_buffer_wraps_and_keeps_recent_order() {
         val ring = PcmRingBuffer(4); ring.add(shortArrayOf(1, 2, 3)); ring.add(shortArrayOf(4, 5))
