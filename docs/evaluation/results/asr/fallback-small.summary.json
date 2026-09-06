@@ -1,0 +1,21 @@
+{
+  "model": "small",
+  "dataset": "SLR61 weather messages fallback",
+  "samples": 100,
+  "failures": 0,
+  "load_seconds": 14.509686297998996,
+  "hardware": {"gpu": "NVIDIA GeForce RTX 3050 Laptop GPU", "memory_total_mb": 4096, "driver": "555.99"},
+  "device": "cuda",
+  "compute_type": "int8_float16",
+  "corpus_wer": 0.21657250470809794,
+  "corpus_cer": 0.2539573296627667,
+  "mean_sample_wer": 0.21733333333333335,
+  "median_sample_wer": 0.2,
+  "p95_sample_wer": 0.4,
+  "mean_latency_seconds": 0.3877649842601386,
+  "median_latency_seconds": 0.3861045540006671,
+  "p95_latency_seconds": 0.43903623199876163,
+  "mean_rtf": 0.11866814548834906,
+  "median_rtf": 0.1117559590544093,
+  "p95_rtf": 0.16619419845228078
+}

@@ -58,6 +58,18 @@ mediana 1,428 s, p95 1,875 s; 16.256 tokens de entrada y 2.841 de salida. En un
 holdout sintético independiente de 15 casos: 15/15 válidos y micro precision, recall
 y F1=1,000. No debe generalizarse fuera de este corpus pequeño.
 
+Como fallback acotado, se ejecutó SLR61 (OpenSLR), usando únicamente sus 100
+mensajes meteorológicos españoles seleccionados con seed `20260906`. Este corpus
+es distinto de FLEURS: contiene habla leída de español argentino/peninsular y se
+distribuye bajo CC BY-SA 4.0. Con CUDA `int8_float16` y una RTX 3050, `base`
+obtuvo WER de corpus 0,3315, CER 0,2880, latencia media 0,211 s y RTF medio
+0,0642; `small` obtuvo WER 0,2166, CER 0,2540, latencia media 0,388 s y RTF
+medio 0,1187. No hubo fallos en 100 muestras por modelo. Estos resultados son
+MEASURED para SLR61 fallback, no sustituyen ni se presentan como resultados de
+FLEURS ni como precisión sobre conversaciones espontáneas. La repetibilidad de
+latencia se midió en 20 muestras fijas durante tres pasadas por modelo; los
+valores están en `results/asr/fallback-latency-repeatability.json`.
+
 ## Interpretación y limitaciones
 
 No es válido concluir que `small` mejora base ni que el LLM es fiable hasta disponer

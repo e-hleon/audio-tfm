@@ -4,6 +4,11 @@
 
 | Modelo | muestras | WER | CER | latencia mediana (s) | p95 (s) | RTF | load time (s) |
 |---|---:|---:|---:|---:|---:|---:|---:|
+| base — fallback SLR61 | 100 | 0.3315 | 0.2880 | 0.205 | 0.260 | 0.0642 | 1.432 |
+| small — fallback SLR61 | 100 | 0.2166 | 0.2540 | 0.386 | 0.439 | 0.1187 | 14.510 |
+
+FLEURS `es_419` permanece bloqueado por la descarga del dataset en Hugging Face;
+estas filas no son resultados FLEURS y no deben mezclarse con ellos.
 
 ## Extracción LLM
 
