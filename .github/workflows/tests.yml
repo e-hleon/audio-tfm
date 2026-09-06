@@ -38,3 +38,5 @@ jobs:
           DATABASE_URL: postgresql+psycopg://audio_tfm:audio_tfm_ci@localhost:5432/audio_tfm
           APP_TIMEZONE: UTC
         run: python -m pytest -q
+      - name: Run evaluation infrastructure tests
+        run: python -m pytest -q tests/test_evaluation.py

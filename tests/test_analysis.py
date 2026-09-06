@@ -84,6 +84,18 @@ def test_openai_rejects_evidence_not_present_in_source(monkeypatch):
         analyzer.analyze("Decidimos preparar una propuesta. Ana preparará una propuesta. Recuérdame revisarla el lunes.")
 
 
+def test_prompt_requires_exact_contiguous_evidence(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    analyzer = OpenAIAnalyzer()
+    calls = []
+    analyzer.client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(
+        status="completed", output_text=AnalysisResult.model_validate(payload()).model_dump_json(),
+        model="gpt-5.4-mini-2026-03-17", usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+    )))
+    analyzer.analyze("Decidimos preparar una propuesta. Ana preparará una propuesta. Recuérdame revisarla el lunes.")
+    assert "substring contiguo" in calls[0]["instructions"]
+
+
 def test_openai_daily_summary_uses_derived_data_only_and_strict_schema(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     analyzer = OpenAIAnalyzer()

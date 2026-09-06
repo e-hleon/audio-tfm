@@ -1,0 +1,54 @@
+{
+  "fixture": "evaluation/fixtures/llm_cases.jsonl",
+  "cases": 36,
+  "valid_schema_percent": 100.0,
+  "failed_calls": 0,
+  "model_requested": "gpt-5.4-mini",
+  "rejection_reasons": {},
+  "model_effective": [
+    "gpt-5.4-mini-2026-03-17"
+  ],
+  "hardware": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.35",
+  "git_commit": "",
+  "categories": {
+    "decisions": {
+      "tp": 9,
+      "fp": 5,
+      "fn": 0,
+      "precision": 0.6428571428571429,
+      "recall": 1.0,
+      "f1": 0.782608695652174
+    },
+    "tasks": {
+      "tp": 12,
+      "fp": 0,
+      "fn": 2,
+      "precision": 1.0,
+      "recall": 0.8571428571428571,
+      "f1": 0.923076923076923
+    },
+    "reminders": {
+      "tp": 8,
+      "fp": 4,
+      "fn": 0,
+      "precision": 0.6666666666666666,
+      "recall": 1.0,
+      "f1": 0.8
+    },
+    "micro": {
+      "tp": 29,
+      "fp": 9,
+      "fn": 2,
+      "precision": 0.7631578947368421,
+      "recall": 0.9354838709677419,
+      "f1": 0.8405797101449276
+    }
+  },
+  "latency_seconds": {
+    "mean": 1.4365186244732386,
+    "median": 1.4278573779956787,
+    "p95": 1.874865227000555
+  },
+  "input_tokens": 16256,
+  "output_tokens": 2841
+}
